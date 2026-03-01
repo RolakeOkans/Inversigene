@@ -1,4 +1,5 @@
 # Inversigene
+<<<<<<< HEAD
 
 A drug repurposing tool for breast cancer. Upload a gene signature 
 (list of differentially expressed genes) and Inversigene scores drugs 
@@ -20,3 +21,6 @@ Under active development.
 - literature.py: PubMed abstract retrieval
 - ai_summary.py: LLM-generated explanations
 - visualizations.py: Plotly charts
+=======
+Inversigene: a Streamlit tool for identifying drug repurposing candidates by matching disease gene signatures to their inverse in the LINCS L1000 database.
+>>>>>>> 85982ba756bb205bf9e4b31530921320c67efc43
