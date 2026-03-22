@@ -38,3 +38,11 @@ ranked = validate(ranked, top_n=20)
 
 print("\nFinal validated drug table:")
 print(ranked.head(20)[["rank", "drug_name", "consensus_score", "trial_count", "in_repurposedb"]].to_string())
+
+from modules.validation import validate
+
+# Step 5: Literature
+print("\n=== Step 5: Fetching gene literature ===")
+literature = fetch_literature(up_genes, down_genes, top_n=5, abstracts_per_gene=3)
+lit_df = literature_to_df(literature)
+print(lit_df[["gene", "direction", "year", "title"]].to_string())
