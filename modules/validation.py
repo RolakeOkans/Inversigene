@@ -80,7 +80,7 @@ def annotate_trials(ranked_df: pd.DataFrame, top_n: int = 20) -> pd.DataFrame:
 
 # ── RepurposeDB ───────────────────────────────────────────────────────────────
 
-def load_repurposedb(filepath: str = "data/repurposedb.csv") -> set:
+def load_repurposedb(filepath: str = "data/repodb.csv") -> set:
     """
     Load RepurposeDB and return a set of lowercase drug names.
 
@@ -92,7 +92,7 @@ def load_repurposedb(filepath: str = "data/repurposedb.csv") -> set:
     try:
         df = pd.read_csv(filepath)
         # RepurposeDB has a 'drug' or 'Drug' column — handle both
-        col = next((c for c in df.columns if c.lower() == "drug"), None)
+        col = next((c for c in df.columns if c.lower() == "drug_name"), None)
         if col is None:
             print(f"  Warning: No 'drug' column found in RepurposeDB. Columns: {df.columns.tolist()}")
             return set()
@@ -158,3 +158,5 @@ if __name__ == "__main__":
     result = validate(fake_ranked, top_n=5)
     print("\nValidated drug table:")
     print(result[["rank", "drug_name", "consensus_score", "trial_count", "in_repurposedb"]].to_string())
+
+
