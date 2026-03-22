@@ -29,3 +29,12 @@ score_summary(ranked)
 
 print("\nTop 20 drug candidates:")
 print(ranked.head(20)[["rank", "drug_name", "consensus_score", "n_experiments"]].to_string())
+
+from modules.validation import validate
+
+# After Step 3, add:
+print("\n=== Step 4: Validating top drugs ===")
+ranked = validate(ranked, top_n=20)
+
+print("\nFinal validated drug table:")
+print(ranked.head(20)[["rank", "drug_name", "consensus_score", "trial_count", "in_repurposedb"]].to_string())
