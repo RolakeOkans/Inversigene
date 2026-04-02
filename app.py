@@ -63,9 +63,8 @@ run = st.button("🚀 Run Analysis", type="primary", use_container_width=True)
 
 if run:
     st.session_state["results"] = None
-    # Clear any previous AI summaries
     for key in list(st.session_state.keys()):
-        if key.startswith("gene_summary_") or key in ["drug_summary"]:
+        if key.startswith("gene_summary_") or key.startswith("drug_summary") :
             del st.session_state[key]
 
     if not uploaded_file and not use_demo:
@@ -298,20 +297,24 @@ if "results" in st.session_state and st.session_state["results"] is not None:
     st.subheader("💊 Drug Repurposing Candidates")
     st.markdown(
         "Drugs ranked by how strongly they reverse your cancer gene signature. "
-        "Higher score = stronger reversal. Expand any drug to get an AI explanation."
+        "Higher score = stronger reversal. **Click any row** to get an AI explanation for that drug."
     )
 
-    # Drug table and bar chart side by side
     col_table, col_chart = st.columns([1.2, 1])
 
     with col_table:
         display_cols = ["rank", "drug_name", "consensus_score", "n_experiments", "trial_count", "in_repurposedb"]
         available_cols = [c for c in display_cols if c in ranked.columns]
-        st.dataframe(
-            ranked.head(top_n_drugs)[available_cols],
+        display_df = ranked.head(top_n_drugs)[available_cols].reset_index(drop=True)
+
+        selection = st.dataframe(
+            display_df,
             use_container_width=True,
-            hide_index=True
+            hide_index=True,
+            on_select="rerun",
+            selection_mode="single-row"
         )
+
         csv_out = ranked.to_csv(index=False).encode("utf-8")
         st.download_button(
             label="⬇️ Download results CSV",
@@ -321,7 +324,8 @@ if "results" in st.session_state and st.session_state["results"] is not None:
         )
 
     with col_chart:
-        top_viz = ranked.head(20).copy()
+        top_viz = ranked.head(top_n_drugs).copy()
+        chart_height = max(400, top_n_drugs * 28)
         fig_bar = px.bar(
             top_viz.sort_values("consensus_score"),
             x="consensus_score",
@@ -334,42 +338,36 @@ if "results" in st.session_state and st.session_state["results"] is not None:
         fig_bar.update_layout(
             showlegend=False,
             coloraxis_showscale=False,
-            height=500,
+            height=chart_height,
             plot_bgcolor="white",
             paper_bgcolor="white",
-            margin=dict(l=0, r=0, t=20, b=0)
+            margin=dict(l=0, r=10, t=20, b=0),
+            yaxis=dict(tickfont=dict(size=11)),
+            xaxis=dict(tickfont=dict(size=11))
         )
         st.plotly_chart(fig_bar, use_container_width=True)
 
-    st.divider()
+    # ── AI explanation for selected drug ──────────────────────────────────────
+    selected_rows = selection.selection.rows if selection.selection.rows else []
 
-    # ── Inline AI explanation per drug ────────────────────────────────────────
-    st.markdown("#### 🤖 Drug AI Explanations")
-    st.markdown("Expand a drug below to generate an AI explanation for why it ranked highly.")
-
-    top_drugs_for_ai = ranked.head(10)
-    for _, drug_row in top_drugs_for_ai.iterrows():
+    if selected_rows:
+        selected_idx = selected_rows[0]
+        drug_row = ranked.iloc[selected_idx]
         drug = drug_row["drug_name"]
-        score = drug_row["consensus_score"]
-        trials = drug_row.get("trial_count", 0)
-        in_repo = drug_row.get("in_repurposedb", False)
+        drug_ai_key = f"drug_summary_{drug}"
 
-        label = f"**{drug}** — score: {score:.2f}"
-        if trials > 0:
-            label += f" | 🏥 {trials} trials"
-        if in_repo:
-            label += " | ✅ in repoDB"
+        st.markdown(f"#### 🤖 AI Explanation — {drug}")
 
-        with st.expander(label):
-            drug_ai_key = f"drug_summary_{drug}"
-            if st.button(f"🤖 Explain {drug}", key=f"drug_btn_{drug}"):
-                single_drug_df = pd.DataFrame([drug_row])
-                with st.spinner(f"Generating explanation for {drug}..."):
-                    try:
-                        explanation = summarize_drugs(single_drug_df, top_n=1)
-                        st.session_state[drug_ai_key] = explanation
-                    except Exception as e:
-                        st.error(f"AI explanation failed: {e}")
+        if drug_ai_key not in st.session_state:
+            with st.spinner(f"Generating explanation for {drug}..."):
+                try:
+                    single_drug_df = pd.DataFrame([drug_row])
+                    explanation = summarize_drugs(single_drug_df, top_n=1)
+                    st.session_state[drug_ai_key] = explanation
+                except Exception as e:
+                    st.error(f"AI explanation failed: {e}")
 
-            if drug_ai_key in st.session_state:
-                st.markdown(st.session_state[drug_ai_key])
+        if drug_ai_key in st.session_state:
+            st.markdown(st.session_state[drug_ai_key])
+    else:
+        st.info("👆 Click a row in the table above to get an AI explanation for that drug.")
