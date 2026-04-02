@@ -328,28 +328,22 @@ if "results" in st.session_state and st.session_state["results"] is not None:
         )
 
     with col_chart:
-        top_viz = ranked.head(top_n_drugs).copy()
-        # Use rank as color so all bars have distinct evenly spaced shading
-        # regardless of how spread out the actual scores are
-        top_viz["rank_color"] = range(len(top_viz), 0, -1)
+        top_viz = ranked.head(top_n_drugs).copy().sort_values("consensus_score")
         chart_height = max(400, top_n_drugs * 28)
 
-        fig_bar = px.bar(
-            top_viz.sort_values("consensus_score"),
-            x="consensus_score",
-            y="drug_name",
+        fig_bar = go.Figure(go.Bar(
+            x=top_viz["consensus_score"],
+            y=top_viz["drug_name"],
             orientation="h",
-            color="rank_color",
-            color_continuous_scale="Blues",
-            labels={"consensus_score": "Reversal Score", "drug_name": "Drug"}
-        )
+            marker_color="#2E86AB",
+            hovertemplate="%{y}: %{x:.2f}<extra></extra>"
+        ))
         fig_bar.update_layout(
-            showlegend=False,
-            coloraxis_showscale=False,
             height=chart_height,
             plot_bgcolor="white",
             paper_bgcolor="white",
             margin=dict(l=0, r=10, t=20, b=0),
+            xaxis_title="Reversal Score",
             yaxis=dict(tickfont=dict(size=11)),
             xaxis=dict(tickfont=dict(size=11))
         )
