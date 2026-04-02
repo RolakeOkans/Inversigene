@@ -308,13 +308,21 @@ if "results" in st.session_state and st.session_state["results"] is not None:
     st.divider()
 
     # ═══════════════════════════════════════════════════════════════════════════
-    # SECTION 3: Pathway enrichment
+    # SECTION 3: Pathway enrichment with visualization
     # ═══════════════════════════════════════════════════════════════════════════
     st.subheader("🧬 Pathway Enrichment")
     st.markdown(
-        "Top biological pathways enriched in your up and downregulated genes, "
-        "computed via Enrichr. Expand a pathway to see which of your genes are driving it."
+        "Top biological pathways enriched in your up and downregulated genes via Enrichr. "
+        "Bar color indicates significance: red = p < 0.0001, orange = p < 0.01, blue = p < 0.05. "
+        "Expand any pathway to see which genes are driving it."
     )
+
+    def pval_color(p):
+        if p < 0.0001:
+            return "#E24B4A"
+        if p < 0.01:
+            return "#EF9F27"
+        return "#378ADD"
 
     tab_up_path, tab_down_path = st.tabs(["⬆️ Upregulated pathways", "⬇️ Downregulated pathways"])
 
@@ -330,10 +338,47 @@ if "results" in st.session_state and st.session_state["results"] is not None:
                         if df.empty:
                             st.info("No significant terms.")
                         else:
+                            # ── Bar chart visualization ───────────────────────
+                            df_sorted = df.sort_values("combined_score", ascending=True)
+                            bar_colors = [pval_color(p) for p in df_sorted["adj_pvalue"]]
+
+                            fig_path = go.Figure()
+                            fig_path.add_trace(go.Bar(
+                                x=df_sorted["combined_score"],
+                                y=df_sorted["term"],
+                                orientation="h",
+                                marker_color=bar_colors,
+                                hovertemplate=(
+                                    "<b>%{y}</b><br>"
+                                    "Combined score: %{x:.1f}<extra></extra>"
+                                )
+                            ))
+                            fig_path.update_layout(
+                                height=max(250, len(df) * 35),
+                                plot_bgcolor="white",
+                                paper_bgcolor="white",
+                                margin=dict(l=0, r=10, t=10, b=0),
+                                xaxis_title="Combined score",
+                                showlegend=False,
+                                xaxis=dict(tickfont=dict(size=11), gridcolor="#f0f0f0"),
+                                yaxis=dict(tickfont=dict(size=11))
+                            )
+                            st.plotly_chart(fig_path, use_container_width=True)
+
+                            # ── Legend ────────────────────────────────────────
+                            leg1, leg2, leg3 = st.columns(3)
+                            leg1.markdown("🔴 p < 0.0001")
+                            leg2.markdown("🟠 p < 0.01")
+                            leg3.markdown("🔵 p < 0.05")
+
+                            st.markdown("---")
+
+                            # ── Expandable pathway details ────────────────────
                             for _, row in df.iterrows():
                                 genes_list = row["genes"].split(";")
                                 with st.expander(
-                                    f"**{row['term']}** — p={row['adj_pvalue']:.2e} | "
+                                    f"**{row['term']}** — "
+                                    f"p = {row['adj_pvalue']:.2e} | "
                                     f"{len(genes_list)} genes"
                                 ):
                                     st.markdown(f"**Adjusted p-value:** {row['adj_pvalue']:.2e}")
