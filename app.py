@@ -248,6 +248,7 @@ if "results" in st.session_state and st.session_state["results"] is not None:
             plot_bgcolor="white",
             paper_bgcolor="white",
             showlegend=False,
+            font=dict(color="#111111"),
             xaxis_title="log2 Fold Change",
             yaxis_title="-log10(p-value)",
             xaxis=dict(showgrid=True, gridcolor="#f0f0f0", zeroline=True, zerolinecolor="gray"),
@@ -338,7 +339,6 @@ if "results" in st.session_state and st.session_state["results"] is not None:
                         if df.empty:
                             st.info("No significant terms.")
                         else:
-                            # ── Bar chart visualization ───────────────────────
                             df_sorted = df.sort_values("combined_score", ascending=True)
                             bar_colors = [pval_color(p) for p in df_sorted["adj_pvalue"]]
 
@@ -354,18 +354,18 @@ if "results" in st.session_state and st.session_state["results"] is not None:
                                 )
                             ))
                             fig_path.update_layout(
-                                height=max(250, len(df) * 35),
+                                height=max(300, len(df) * 40),
                                 plot_bgcolor="white",
                                 paper_bgcolor="white",
-                                margin=dict(l=0, r=10, t=10, b=0),
+                                font=dict(color="#111111"),
+                                margin=dict(l=10, r=20, t=10, b=40),
                                 xaxis_title="Combined score",
                                 showlegend=False,
-                                xaxis=dict(tickfont=dict(size=11), gridcolor="#f0f0f0"),
-                                yaxis=dict(tickfont=dict(size=11))
+                                xaxis=dict(gridcolor="#f0f0f0", automargin=True),
+                                yaxis=dict(automargin=True)
                             )
                             st.plotly_chart(fig_path, use_container_width=True)
 
-                            # ── Legend ────────────────────────────────────────
                             leg1, leg2, leg3 = st.columns(3)
                             leg1.markdown("🔴 p < 0.0001")
                             leg2.markdown("🟠 p < 0.01")
@@ -373,7 +373,6 @@ if "results" in st.session_state and st.session_state["results"] is not None:
 
                             st.markdown("---")
 
-                            # ── Expandable pathway details ────────────────────
                             for _, row in df.iterrows():
                                 genes_list = row["genes"].split(";")
                                 with st.expander(
@@ -435,10 +434,11 @@ if "results" in st.session_state and st.session_state["results"] is not None:
             height=chart_height,
             plot_bgcolor="white",
             paper_bgcolor="white",
-            margin=dict(l=0, r=10, t=20, b=0),
+            font=dict(color="#111111"),
+            margin=dict(l=10, r=20, t=20, b=40),
             xaxis_title="Reversal Score",
-            yaxis=dict(tickfont=dict(size=11)),
-            xaxis=dict(tickfont=dict(size=11))
+            xaxis=dict(automargin=True),
+            yaxis=dict(automargin=True)
         )
         st.plotly_chart(fig_bar, use_container_width=True)
 
