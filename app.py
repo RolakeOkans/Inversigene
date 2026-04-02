@@ -64,7 +64,7 @@ run = st.button("🚀 Run Analysis", type="primary", use_container_width=True)
 if run:
     st.session_state["results"] = None
     for key in list(st.session_state.keys()):
-        if key.startswith("gene_summary_") or key.startswith("drug_summary") :
+        if key.startswith("gene_summary_") or key.startswith("drug_summary"):
             del st.session_state[key]
 
     if not uploaded_file and not use_demo:
@@ -125,7 +125,7 @@ if run:
 
     progress.progress(55, text="Checking clinical trials and repurposing databases...")
 
-    # ── Step 4: Validate ──────────────────────────────────────────────────────
+    # ── Step 4: Validate ──────────────────────────────────────════════════════
     try:
         ranked = validate(ranked, top_n=top_n_drugs)
     except Exception as e:
@@ -152,7 +152,9 @@ if run:
         "ranked": ranked,
         "lit_df": lit_df,
         "sig_df": sig_df,
-        "literature": literature
+        "literature": literature,
+        "up_genes": up_genes,
+        "down_genes": down_genes
     }
 
 # ── Display results ───────────────────────────────────────────────────────────
@@ -161,6 +163,8 @@ if "results" in st.session_state and st.session_state["results"] is not None:
     lit_df = st.session_state["results"]["lit_df"]
     sig_df = st.session_state["results"]["sig_df"]
     literature = st.session_state["results"]["literature"]
+    up_genes = st.session_state["results"]["up_genes"]
+    down_genes = st.session_state["results"]["down_genes"]
 
     # ═══════════════════════════════════════════════════════════════════════════
     # HEADLINE SUMMARY CARDS
@@ -326,6 +330,10 @@ if "results" in st.session_state and st.session_state["results"] is not None:
     with col_chart:
         top_viz = ranked.head(top_n_drugs).copy()
         chart_height = max(400, top_n_drugs * 28)
+
+        # Cap color scale at 95th percentile so outliers don't wash out the rest
+        color_max = top_viz["consensus_score"].quantile(0.95)
+
         fig_bar = px.bar(
             top_viz.sort_values("consensus_score"),
             x="consensus_score",
@@ -333,6 +341,7 @@ if "results" in st.session_state and st.session_state["results"] is not None:
             orientation="h",
             color="consensus_score",
             color_continuous_scale="Blues",
+            range_color=[0, color_max],
             labels={"consensus_score": "Reversal Score", "drug_name": "Drug"}
         )
         fig_bar.update_layout(
@@ -362,7 +371,12 @@ if "results" in st.session_state and st.session_state["results"] is not None:
             with st.spinner(f"Generating explanation for {drug}..."):
                 try:
                     single_drug_df = pd.DataFrame([drug_row])
-                    explanation = summarize_drugs(single_drug_df, top_n=1)
+                    explanation = summarize_drugs(
+                        single_drug_df,
+                        top_n=1,
+                        up_genes=up_genes,
+                        down_genes=down_genes
+                    )
                     st.session_state[drug_ai_key] = explanation
                 except Exception as e:
                     st.error(f"AI explanation failed: {e}")
