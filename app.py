@@ -63,6 +63,10 @@ run = st.button("🚀 Run Analysis", type="primary", use_container_width=True)
 
 if run:
     st.session_state["results"] = None
+    # Clear any previous AI summaries
+    for key in list(st.session_state.keys()):
+        if key.startswith("gene_summary_") or key in ["drug_summary"]:
+            del st.session_state[key]
 
     if not uploaded_file and not use_demo:
         st.error("Please upload a gene signature CSV or check 'Use built-in dataset'.")
@@ -152,78 +156,47 @@ if run:
         "literature": literature
     }
 
-# ── Display results from session state ───────────────────────────────────────
+# ── Display results ───────────────────────────────────────────────────────────
 if "results" in st.session_state and st.session_state["results"] is not None:
     ranked = st.session_state["results"]["ranked"]
     lit_df = st.session_state["results"]["lit_df"]
     sig_df = st.session_state["results"]["sig_df"]
     literature = st.session_state["results"]["literature"]
 
-    st.success(f"Analysis complete — ranked {len(ranked)} drugs, fetched {len(lit_df)} abstracts.")
+    # ═══════════════════════════════════════════════════════════════════════════
+    # HEADLINE SUMMARY CARDS
+    # ═══════════════════════════════════════════════════════════════════════════
+    st.markdown("### 📊 Analysis Summary")
+    c1, c2, c3, c4 = st.columns(4)
+
+    top_drug = ranked.iloc[0]["drug_name"] if not ranked.empty else "N/A"
+    drugs_with_trials = int((ranked["trial_count"] > 0).sum()) if "trial_count" in ranked.columns else 0
+    top_gene_up = sig_df[sig_df["direction"] == "up"].iloc[0]["gene_symbol"] if not sig_df.empty else "N/A"
+    top_gene_down = sig_df[sig_df["direction"] == "down"].iloc[0]["gene_symbol"] if not sig_df.empty else "N/A"
+
+    c1.metric("🥇 Top Drug Candidate", top_drug)
+    c2.metric("🏥 Drugs with Clinical Trials", drugs_with_trials)
+    c3.metric("⬆️ Top Upregulated Gene", top_gene_up)
+    c4.metric("⬇️ Top Downregulated Gene", top_gene_down)
+
     st.divider()
 
-    # ── Signature preview ─────────────────────────────────────────────────────
-    with st.expander("📋 Gene signature preview", expanded=False):
+    # ═══════════════════════════════════════════════════════════════════════════
+    # SECTION 1: Signature preview + Volcano plot
+    # ═══════════════════════════════════════════════════════════════════════════
+    st.subheader("🔬 Your Gene Signature")
+
+    tab_preview, tab_volcano = st.tabs(["Signature preview", "Volcano plot"])
+
+    with tab_preview:
         col1, col2, col3 = st.columns(3)
         col1.metric("Total genes", len(sig_df))
         col2.metric("Upregulated", (sig_df["direction"] == "up").sum())
         col3.metric("Downregulated", (sig_df["direction"] == "down").sum())
-        st.dataframe(sig_df.head(20), use_container_width=True)
-
-    st.divider()
-
-    # ═══════════════════════════════════════════════════════════════════════════
-    # SECTION 1: Ranked drug table
-    # ═══════════════════════════════════════════════════════════════════════════
-    st.subheader("💊 Ranked Drug Candidates")
-    st.markdown(
-        "Drugs ranked by how strongly they reverse your cancer gene signature. "
-        "Higher score = stronger reversal. Trial count from ClinicalTrials.gov for breast cancer."
-    )
-
-    display_cols = ["rank", "drug_name", "consensus_score", "n_experiments", "trial_count", "in_repurposedb"]
-    available_cols = [c for c in display_cols if c in ranked.columns]
-
-    st.dataframe(
-        ranked.head(top_n_drugs)[available_cols],
-        use_container_width=True,
-        hide_index=True
-    )
-
-    csv_out = ranked.to_csv(index=False).encode("utf-8")
-    st.download_button(
-        label="⬇️ Download full ranked table as CSV",
-        data=csv_out,
-        file_name="inversigene_results.csv",
-        mime="text/csv"
-    )
-
-    st.divider()
-
-    # ═══════════════════════════════════════════════════════════════════════════
-    # SECTION 2: Visualizations
-    # ═══════════════════════════════════════════════════════════════════════════
-    st.subheader("📊 Visualizations")
-
-    tab_bar, tab_volcano = st.tabs(["Drug scores", "Volcano plot"])
-
-    with tab_bar:
-        st.markdown("**Top 20 drugs by reversal score**")
-        top_viz = ranked.head(20).copy()
-        fig_bar = px.bar(
-            top_viz.sort_values("consensus_score"),
-            x="consensus_score",
-            y="drug_name",
-            orientation="h",
-            color="consensus_score",
-            color_continuous_scale="Blues",
-            labels={"consensus_score": "Reversal Score", "drug_name": "Drug"}
-        )
-        fig_bar.update_layout(showlegend=False, coloraxis_showscale=False)
-        st.plotly_chart(fig_bar, use_container_width=True)
+        st.dataframe(sig_df.head(20), use_container_width=True, hide_index=True)
 
     with tab_volcano:
-        st.markdown("**Volcano plot of input gene signature**")
+        st.markdown("Red = upregulated, Blue = downregulated. Dashed lines show significance thresholds.")
 
         vol_df = sig_df.copy()
         vol_df["log2fc"] = pd.to_numeric(vol_df["log2fc"], errors="coerce")
@@ -255,9 +228,8 @@ if "results" in st.session_state and st.session_state["results"] is not None:
         fig_vol.add_vline(x=1, line_dash="dash", line_color="gray", line_width=1)
         fig_vol.add_vline(x=-1, line_dash="dash", line_color="gray", line_width=1)
         fig_vol.add_hline(y=-np.log10(0.05), line_dash="dash", line_color="gray", line_width=1)
-
         fig_vol.update_layout(
-            height=600,
+            height=550,
             plot_bgcolor="white",
             paper_bgcolor="white",
             showlegend=False,
@@ -266,18 +238,17 @@ if "results" in st.session_state and st.session_state["results"] is not None:
             xaxis=dict(showgrid=True, gridcolor="#f0f0f0", zeroline=True, zerolinecolor="gray"),
             yaxis=dict(showgrid=True, gridcolor="#f0f0f0")
         )
-
         st.plotly_chart(fig_vol, use_container_width=True)
 
     st.divider()
 
     # ═══════════════════════════════════════════════════════════════════════════
-    # SECTION 3: Gene literature with inline AI synthesis
+    # SECTION 2: Gene literature with inline AI synthesis
     # ═══════════════════════════════════════════════════════════════════════════
     st.subheader("📚 Gene Literature & AI Synthesis")
     st.markdown(
-        "Click a gene to see published abstracts. "
-        "Use the AI button inside each gene to generate an inline synthesis."
+        "Expand a gene to read published abstracts and generate an AI summary inline. "
+        "Upregulated genes drive the cancer pattern — downregulated genes are suppressed by it."
     )
 
     tab_up, tab_down = st.tabs(["⬆️ Upregulated genes", "⬇️ Downregulated genes"])
@@ -292,7 +263,6 @@ if "results" in st.session_state and st.session_state["results"] is not None:
                     gene_abstracts = subset[subset["gene"] == gene]
                     with st.expander(f"**{gene}** — {len(gene_abstracts)} abstracts"):
 
-                        # AI synthesis button per gene
                         ai_key = f"gene_summary_{gene}"
                         if st.button(f"🤖 Synthesize {gene} with AI", key=f"btn_{gene}"):
                             gene_lit = {
@@ -308,13 +278,11 @@ if "results" in st.session_state and st.session_state["results"] is not None:
                                 except Exception as e:
                                     st.error(f"AI summary failed: {e}")
 
-                        # Show AI summary if generated
                         if ai_key in st.session_state:
                             st.markdown("**🤖 AI Synthesis:**")
                             st.markdown(st.session_state[ai_key])
                             st.divider()
 
-                        # Raw abstracts below
                         st.markdown("**📄 Abstracts:**")
                         for _, row in gene_abstracts.iterrows():
                             st.markdown(f"**{row['year']} — {row['title']}**")
@@ -325,20 +293,83 @@ if "results" in st.session_state and st.session_state["results"] is not None:
     st.divider()
 
     # ═══════════════════════════════════════════════════════════════════════════
-    # SECTION 4: Drug AI explanations
+    # SECTION 3: Ranked drug table + bar chart + inline AI explanations
     # ═══════════════════════════════════════════════════════════════════════════
-    st.subheader("🤖 Drug AI Explanations")
+    st.subheader("💊 Drug Repurposing Candidates")
     st.markdown(
-        "Generate plain English explanations for why the top drugs ranked highly."
+        "Drugs ranked by how strongly they reverse your cancer gene signature. "
+        "Higher score = stronger reversal. Expand any drug to get an AI explanation."
     )
 
-    if st.button("Generate drug explanations", key="ai_drugs"):
-        with st.spinner("Generating AI explanations..."):
-            try:
-                drug_summary = summarize_drugs(ranked, top_n=5)
-                st.session_state["drug_summary"] = drug_summary
-            except Exception as e:
-                st.error(f"AI summary failed: {e}")
+    # Drug table and bar chart side by side
+    col_table, col_chart = st.columns([1.2, 1])
 
-    if "drug_summary" in st.session_state:
-        st.markdown(st.session_state["drug_summary"])
+    with col_table:
+        display_cols = ["rank", "drug_name", "consensus_score", "n_experiments", "trial_count", "in_repurposedb"]
+        available_cols = [c for c in display_cols if c in ranked.columns]
+        st.dataframe(
+            ranked.head(top_n_drugs)[available_cols],
+            use_container_width=True,
+            hide_index=True
+        )
+        csv_out = ranked.to_csv(index=False).encode("utf-8")
+        st.download_button(
+            label="⬇️ Download results CSV",
+            data=csv_out,
+            file_name="inversigene_results.csv",
+            mime="text/csv"
+        )
+
+    with col_chart:
+        top_viz = ranked.head(20).copy()
+        fig_bar = px.bar(
+            top_viz.sort_values("consensus_score"),
+            x="consensus_score",
+            y="drug_name",
+            orientation="h",
+            color="consensus_score",
+            color_continuous_scale="Blues",
+            labels={"consensus_score": "Reversal Score", "drug_name": "Drug"}
+        )
+        fig_bar.update_layout(
+            showlegend=False,
+            coloraxis_showscale=False,
+            height=500,
+            plot_bgcolor="white",
+            paper_bgcolor="white",
+            margin=dict(l=0, r=0, t=20, b=0)
+        )
+        st.plotly_chart(fig_bar, use_container_width=True)
+
+    st.divider()
+
+    # ── Inline AI explanation per drug ────────────────────────────────────────
+    st.markdown("#### 🤖 Drug AI Explanations")
+    st.markdown("Expand a drug below to generate an AI explanation for why it ranked highly.")
+
+    top_drugs_for_ai = ranked.head(10)
+    for _, drug_row in top_drugs_for_ai.iterrows():
+        drug = drug_row["drug_name"]
+        score = drug_row["consensus_score"]
+        trials = drug_row.get("trial_count", 0)
+        in_repo = drug_row.get("in_repurposedb", False)
+
+        label = f"**{drug}** — score: {score:.2f}"
+        if trials > 0:
+            label += f" | 🏥 {trials} trials"
+        if in_repo:
+            label += " | ✅ in repoDB"
+
+        with st.expander(label):
+            drug_ai_key = f"drug_summary_{drug}"
+            if st.button(f"🤖 Explain {drug}", key=f"drug_btn_{drug}"):
+                single_drug_df = pd.DataFrame([drug_row])
+                with st.spinner(f"Generating explanation for {drug}..."):
+                    try:
+                        explanation = summarize_drugs(single_drug_df, top_n=1)
+                        st.session_state[drug_ai_key] = explanation
+                    except Exception as e:
+                        st.error(f"AI explanation failed: {e}")
+
+            if drug_ai_key in st.session_state:
+                st.markdown(st.session_state[drug_ai_key])
