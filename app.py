@@ -18,6 +18,7 @@ from modules.scoring import rank_drugs
 from modules.validation import validate
 from modules.literature import fetch_literature, literature_to_df
 from modules.ai_summary import summarize_drugs, summarize_genes
+from modules.pathways import get_pathway_enrichment
 
 # ── Page config ───────────────────────────────────────────────────────────────
 st.set_page_config(
@@ -131,7 +132,7 @@ if run:
     except Exception as e:
         st.warning(f"Validation step had an issue: {e}")
 
-    progress.progress(75, text="Searching PubMed for key gene literature...")
+    progress.progress(68, text="Searching PubMed for key gene literature...")
 
     # ── Step 5: Literature ────────────────────────────────────────────────────
     try:
@@ -146,6 +147,15 @@ if run:
         literature = {"up": [], "down": []}
         lit_df = pd.DataFrame()
 
+    progress.progress(82, text="Running pathway enrichment via Enrichr...")
+
+    # ── Step 6: Pathway enrichment ────────────────────────────────────────────
+    try:
+        pathways = get_pathway_enrichment(up_genes, down_genes, top_n=100)
+    except Exception as e:
+        st.warning(f"Pathway enrichment had an issue: {e}")
+        pathways = {"up": {}, "down": {}}
+
     progress.progress(100, text="✅ Analysis complete!")
 
     st.session_state["results"] = {
@@ -154,7 +164,8 @@ if run:
         "sig_df": sig_df,
         "literature": literature,
         "up_genes": up_genes,
-        "down_genes": down_genes
+        "down_genes": down_genes,
+        "pathways": pathways
     }
 
 # ── Display results ───────────────────────────────────────────────────────────
@@ -165,6 +176,7 @@ if "results" in st.session_state and st.session_state["results"] is not None:
     literature = st.session_state["results"]["literature"]
     up_genes = st.session_state["results"]["up_genes"]
     down_genes = st.session_state["results"]["down_genes"]
+    pathways = st.session_state["results"]["pathways"]
 
     # ═══════════════════════════════════════════════════════════════════════════
     # HEADLINE SUMMARY CARDS
@@ -296,7 +308,43 @@ if "results" in st.session_state and st.session_state["results"] is not None:
     st.divider()
 
     # ═══════════════════════════════════════════════════════════════════════════
-    # SECTION 3: Ranked drug table + bar chart + inline AI explanations
+    # SECTION 3: Pathway enrichment
+    # ═══════════════════════════════════════════════════════════════════════════
+    st.subheader("🧬 Pathway Enrichment")
+    st.markdown(
+        "Top biological pathways enriched in your up and downregulated genes, "
+        "computed via Enrichr. Expand a pathway to see which of your genes are driving it."
+    )
+
+    tab_up_path, tab_down_path = st.tabs(["⬆️ Upregulated pathways", "⬇️ Downregulated pathways"])
+
+    for tab, direction in [(tab_up_path, "up"), (tab_down_path, "down")]:
+        with tab:
+            direction_pathways = pathways.get(direction, {})
+            if not direction_pathways:
+                st.info("No significant pathways found.")
+            else:
+                lib_tabs = st.tabs(list(direction_pathways.keys()))
+                for lib_tab, (lib_name, df) in zip(lib_tabs, direction_pathways.items()):
+                    with lib_tab:
+                        if df.empty:
+                            st.info("No significant terms.")
+                        else:
+                            for _, row in df.iterrows():
+                                genes_list = row["genes"].split(";")
+                                with st.expander(
+                                    f"**{row['term']}** — p={row['adj_pvalue']:.2e} | "
+                                    f"{len(genes_list)} genes"
+                                ):
+                                    st.markdown(f"**Adjusted p-value:** {row['adj_pvalue']:.2e}")
+                                    st.markdown(f"**Combined score:** {row['combined_score']:.2f}")
+                                    st.markdown("**Genes driving this pathway:**")
+                                    st.code(" | ".join(genes_list))
+
+    st.divider()
+
+    # ═══════════════════════════════════════════════════════════════════════════
+    # SECTION 4: Ranked drug table + bar chart + inline AI explanations
     # ═══════════════════════════════════════════════════════════════════════════
     st.subheader("💊 Drug Repurposing Candidates")
     st.markdown(
