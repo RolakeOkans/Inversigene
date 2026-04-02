@@ -20,6 +20,8 @@ from modules.literature import fetch_literature, literature_to_df
 from modules.ai_summary import summarize_drugs, summarize_genes
 from modules.pathways import get_pathway_enrichment
 
+FONT_COLOR = "#111111"
+
 # ── Page config ───────────────────────────────────────────────────────────────
 st.set_page_config(
     page_title="Inversigene",
@@ -248,11 +250,21 @@ if "results" in st.session_state and st.session_state["results"] is not None:
             plot_bgcolor="white",
             paper_bgcolor="white",
             showlegend=False,
-            font=dict(color="#111111"),
             xaxis_title="log2 Fold Change",
             yaxis_title="-log10(p-value)",
-            xaxis=dict(showgrid=True, gridcolor="#f0f0f0", zeroline=True, zerolinecolor="gray"),
-            yaxis=dict(showgrid=True, gridcolor="#f0f0f0")
+            xaxis=dict(
+                showgrid=True, gridcolor="#f0f0f0",
+                zeroline=True, zerolinecolor="gray",
+                tickfont=dict(color=FONT_COLOR),
+                title_font=dict(color=FONT_COLOR),
+                automargin=True
+            ),
+            yaxis=dict(
+                showgrid=True, gridcolor="#f0f0f0",
+                tickfont=dict(color=FONT_COLOR),
+                title_font=dict(color=FONT_COLOR),
+                automargin=True
+            )
         )
         st.plotly_chart(fig_vol, use_container_width=True)
 
@@ -357,12 +369,20 @@ if "results" in st.session_state and st.session_state["results"] is not None:
                                 height=max(300, len(df) * 40),
                                 plot_bgcolor="white",
                                 paper_bgcolor="white",
-                                font=dict(color="#111111"),
                                 margin=dict(l=10, r=20, t=10, b=40),
                                 xaxis_title="Combined score",
                                 showlegend=False,
-                                xaxis=dict(gridcolor="#f0f0f0", automargin=True),
-                                yaxis=dict(automargin=True)
+                                xaxis=dict(
+                                    gridcolor="#f0f0f0",
+                                    automargin=True,
+                                    tickfont=dict(color=FONT_COLOR),
+                                    title_font=dict(color=FONT_COLOR)
+                                ),
+                                yaxis=dict(
+                                    automargin=True,
+                                    tickfont=dict(color=FONT_COLOR),
+                                    title_font=dict(color=FONT_COLOR)
+                                )
                             )
                             st.plotly_chart(fig_path, use_container_width=True)
 
@@ -434,11 +454,18 @@ if "results" in st.session_state and st.session_state["results"] is not None:
             height=chart_height,
             plot_bgcolor="white",
             paper_bgcolor="white",
-            font=dict(color="#111111"),
             margin=dict(l=10, r=20, t=20, b=40),
             xaxis_title="Reversal Score",
-            xaxis=dict(automargin=True),
-            yaxis=dict(automargin=True)
+            xaxis=dict(
+                automargin=True,
+                tickfont=dict(color=FONT_COLOR),
+                title_font=dict(color=FONT_COLOR)
+            ),
+            yaxis=dict(
+                automargin=True,
+                tickfont=dict(color=FONT_COLOR),
+                title_font=dict(color=FONT_COLOR)
+            )
         )
         st.plotly_chart(fig_bar, use_container_width=True)
 
