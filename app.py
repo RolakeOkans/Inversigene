@@ -17,6 +17,7 @@ from modules.lincs import query_lincs
 from modules.scoring import rank_drugs
 from modules.validation import validate
 from modules.literature import fetch_literature, literature_to_df
+from modules.ai_summary import summarize_drugs, summarize_genes
 
 # ── Page config ───────────────────────────────────────────────────────────────
 st.set_page_config(
@@ -139,6 +140,7 @@ if run:
         lit_df = literature_to_df(literature)
     except Exception as e:
         st.warning(f"Literature step had an issue: {e}")
+        literature = {"up": [], "down": []}
         lit_df = pd.DataFrame()
 
     progress.progress(100, text="✅ Analysis complete!")
@@ -146,7 +148,8 @@ if run:
     st.session_state["results"] = {
         "ranked": ranked,
         "lit_df": lit_df,
-        "sig_df": sig_df
+        "sig_df": sig_df,
+        "literature": literature
     }
 
 # ── Display results from session state ───────────────────────────────────────
@@ -154,6 +157,7 @@ if "results" in st.session_state and st.session_state["results"] is not None:
     ranked = st.session_state["results"]["ranked"]
     lit_df = st.session_state["results"]["lit_df"]
     sig_df = st.session_state["results"]["sig_df"]
+    literature = st.session_state["results"]["literature"]
 
     st.success(f"Analysis complete — ranked {len(ranked)} drugs, fetched {len(lit_df)} abstracts.")
     st.divider()
@@ -221,7 +225,6 @@ if "results" in st.session_state and st.session_state["results"] is not None:
     with tab_volcano:
         st.markdown("**Volcano plot of input gene signature**")
 
-        # Prepare data
         vol_df = sig_df.copy()
         vol_df["log2fc"] = pd.to_numeric(vol_df["log2fc"], errors="coerce")
         vol_df["p_value"] = pd.to_numeric(vol_df["p_value"], errors="coerce")
@@ -229,12 +232,10 @@ if "results" in st.session_state and st.session_state["results"] is not None:
         vol_df["-log10p"] = -np.log10(vol_df["p_value"].clip(lower=1e-300))
         vol_df = vol_df[np.isfinite(vol_df["-log10p"])]
 
-        # Color by significance
         vol_df["color"] = "neutral"
         vol_df.loc[(vol_df["log2fc"] > 1) & (vol_df["p_value"] < 0.05), "color"] = "up"
         vol_df.loc[(vol_df["log2fc"] < -1) & (vol_df["p_value"] < 0.05), "color"] = "down"
 
-        # Build with graph_objects for reliability
         colors = {"up": "#e74c3c", "down": "#3498db", "neutral": "#bdc3c7"}
         fig_vol = go.Figure()
 
@@ -251,7 +252,6 @@ if "results" in st.session_state and st.session_state["results"] is not None:
                 name=group
             ))
 
-        # Add threshold lines
         fig_vol.add_vline(x=1, line_dash="dash", line_color="gray", line_width=1)
         fig_vol.add_vline(x=-1, line_dash="dash", line_color="gray", line_width=1)
         fig_vol.add_hline(y=-np.log10(0.05), line_dash="dash", line_color="gray", line_width=1)
@@ -302,12 +302,35 @@ if "results" in st.session_state and st.session_state["results"] is not None:
     st.divider()
 
     # ═══════════════════════════════════════════════════════════════════════════
-    # SECTION 4: AI summaries (placeholder)
+    # SECTION 4: AI summaries
     # ═══════════════════════════════════════════════════════════════════════════
     st.subheader("🤖 AI Summaries")
-    st.info(
-        "AI-generated explanations for top drug candidates and gene literature "
-        "summaries are coming in the next version. "
-        "This will use the Anthropic API to explain why each drug ranked highly "
-        "and what the literature says about your key genes."
+    st.markdown(
+        "Click a button below to generate AI-powered explanations using the Anthropic API. "
+        "Drug explanations interpret why each candidate ranked highly. "
+        "Gene synthesis summarizes what the literature says about your key genes."
     )
+
+    tab_drugs_ai, tab_genes_ai = st.tabs(["Drug explanations", "Gene synthesis"])
+
+    with tab_drugs_ai:
+        if st.button("Generate drug explanations", key="ai_drugs"):
+            with st.spinner("Generating AI explanations..."):
+                try:
+                    drug_summary = summarize_drugs(ranked, top_n=5)
+                    st.session_state["drug_summary"] = drug_summary
+                except Exception as e:
+                    st.error(f"AI summary failed: {e}")
+        if "drug_summary" in st.session_state:
+            st.markdown(st.session_state["drug_summary"])
+
+    with tab_genes_ai:
+        if st.button("Generate gene synthesis", key="ai_genes"):
+            with st.spinner("Generating AI synthesis..."):
+                try:
+                    gene_summary = summarize_genes(literature, top_n=5)
+                    st.session_state["gene_summary"] = gene_summary
+                except Exception as e:
+                    st.error(f"AI synthesis failed: {e}")
+        if "gene_summary" in st.session_state:
+            st.markdown(st.session_state["gene_summary"])
