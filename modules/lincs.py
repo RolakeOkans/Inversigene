@@ -48,7 +48,7 @@ def query_lincs(up_genes: list[str], down_genes: list[str], n_results: int = 50)
     payload = {
         **entities,
         "database": CHEMICAL_LIBRARY,
-        "limit": n_results * 5  # fetch extra so we have enough reversers after filtering
+        "limit": n_results * 10  # fetch extra so we have enough reversers after filtering
     }
 
     try:
@@ -219,7 +219,7 @@ if __name__ == "__main__":
     test_up = ["ESR1", "GATA3", "TFF1", "PGR", "FOXA1"]
     test_down = ["MKI67", "TOP2A", "AURKA", "CCNB1", "CDK1"]
 
-    df = query_lincs(test_up, test_down, n_results=20)
+    df = query_lincs(test_up, test_down, n_results=200)
 
     print("\nTop drug candidates (reversers):")
     print(df[["drug_name", "logp_avg", "z_sum", "cell_line", "pert_dose"]].to_string())
