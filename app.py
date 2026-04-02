@@ -272,65 +272,73 @@ if "results" in st.session_state and st.session_state["results"] is not None:
     st.divider()
 
     # ═══════════════════════════════════════════════════════════════════════════
-    # SECTION 3: Gene literature
+    # SECTION 3: Gene literature with inline AI synthesis
     # ═══════════════════════════════════════════════════════════════════════════
-    st.subheader("📚 Gene Literature (PubMed)")
+    st.subheader("📚 Gene Literature & AI Synthesis")
     st.markdown(
-        "Recent abstracts about the top up and down regulated genes in your signature, "
-        "filtered for breast cancer relevance."
+        "Click a gene to see published abstracts. "
+        "Use the AI button inside each gene to generate an inline synthesis."
     )
 
-    if not lit_df.empty:
-        tab_up, tab_down = st.tabs(["⬆️ Upregulated genes", "⬇️ Downregulated genes"])
+    tab_up, tab_down = st.tabs(["⬆️ Upregulated genes", "⬇️ Downregulated genes"])
 
-        for tab, direction in [(tab_up, "up"), (tab_down, "down")]:
-            with tab:
-                subset = lit_df[lit_df["direction"] == direction]
-                if subset.empty:
-                    st.info("No abstracts found.")
-                else:
-                    for gene in subset["gene"].unique():
-                        gene_abstracts = subset[subset["gene"] == gene]
-                        st.markdown(f"**{gene}**")
+    for tab, direction in [(tab_up, "up"), (tab_down, "down")]:
+        with tab:
+            subset = lit_df[lit_df["direction"] == direction] if not lit_df.empty else pd.DataFrame()
+            if subset.empty:
+                st.info("No abstracts found.")
+            else:
+                for gene in subset["gene"].unique():
+                    gene_abstracts = subset[subset["gene"] == gene]
+                    with st.expander(f"**{gene}** — {len(gene_abstracts)} abstracts"):
+
+                        # AI synthesis button per gene
+                        ai_key = f"gene_summary_{gene}"
+                        if st.button(f"🤖 Synthesize {gene} with AI", key=f"btn_{gene}"):
+                            gene_lit = {
+                                direction: [
+                                    row.to_dict()
+                                    for _, row in gene_abstracts.iterrows()
+                                ]
+                            }
+                            with st.spinner(f"Generating summary for {gene}..."):
+                                try:
+                                    summary = summarize_genes(gene_lit, top_n=1)
+                                    st.session_state[ai_key] = summary
+                                except Exception as e:
+                                    st.error(f"AI summary failed: {e}")
+
+                        # Show AI summary if generated
+                        if ai_key in st.session_state:
+                            st.markdown("**🤖 AI Synthesis:**")
+                            st.markdown(st.session_state[ai_key])
+                            st.divider()
+
+                        # Raw abstracts below
+                        st.markdown("**📄 Abstracts:**")
                         for _, row in gene_abstracts.iterrows():
-                            with st.expander(f"{row['year']} — {row['title'][:100]}..."):
-                                st.markdown(f"**PMID:** {row['pmid']}")
-                                st.write(row["abstract"] if row["abstract"] else "Abstract not available.")
-    else:
-        st.info("No literature results available.")
+                            st.markdown(f"**{row['year']} — {row['title']}**")
+                            st.write(row["abstract"] if row["abstract"] else "Abstract not available.")
+                            st.markdown(f"PMID: {row['pmid']}")
+                            st.markdown("---")
 
     st.divider()
 
     # ═══════════════════════════════════════════════════════════════════════════
-    # SECTION 4: AI summaries
+    # SECTION 4: Drug AI explanations
     # ═══════════════════════════════════════════════════════════════════════════
-    st.subheader("🤖 AI Summaries")
+    st.subheader("🤖 Drug AI Explanations")
     st.markdown(
-        "Click a button below to generate AI-powered explanations using the Anthropic API. "
-        "Drug explanations interpret why each candidate ranked highly. "
-        "Gene synthesis summarizes what the literature says about your key genes."
+        "Generate plain English explanations for why the top drugs ranked highly."
     )
 
-    tab_drugs_ai, tab_genes_ai = st.tabs(["Drug explanations", "Gene synthesis"])
+    if st.button("Generate drug explanations", key="ai_drugs"):
+        with st.spinner("Generating AI explanations..."):
+            try:
+                drug_summary = summarize_drugs(ranked, top_n=5)
+                st.session_state["drug_summary"] = drug_summary
+            except Exception as e:
+                st.error(f"AI summary failed: {e}")
 
-    with tab_drugs_ai:
-        if st.button("Generate drug explanations", key="ai_drugs"):
-            with st.spinner("Generating AI explanations..."):
-                try:
-                    drug_summary = summarize_drugs(ranked, top_n=5)
-                    st.session_state["drug_summary"] = drug_summary
-                except Exception as e:
-                    st.error(f"AI summary failed: {e}")
-        if "drug_summary" in st.session_state:
-            st.markdown(st.session_state["drug_summary"])
-
-    with tab_genes_ai:
-        if st.button("Generate gene synthesis", key="ai_genes"):
-            with st.spinner("Generating AI synthesis..."):
-                try:
-                    gene_summary = summarize_genes(literature, top_n=5)
-                    st.session_state["gene_summary"] = gene_summary
-                except Exception as e:
-                    st.error(f"AI synthesis failed: {e}")
-        if "gene_summary" in st.session_state:
-            st.markdown(st.session_state["gene_summary"])
+    if "drug_summary" in st.session_state:
+        st.markdown(st.session_state["drug_summary"])
