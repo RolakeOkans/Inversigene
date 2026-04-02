@@ -125,7 +125,7 @@ if run:
 
     progress.progress(55, text="Checking clinical trials and repurposing databases...")
 
-    # ── Step 4: Validate ──────────────────────────────────────════════════════
+    # ── Step 4: Validate ──────────────────────────────────────────────────────
     try:
         ranked = validate(ranked, top_n=top_n_drugs)
     except Exception as e:
@@ -329,19 +329,18 @@ if "results" in st.session_state and st.session_state["results"] is not None:
 
     with col_chart:
         top_viz = ranked.head(top_n_drugs).copy()
+        # Use rank as color so all bars have distinct evenly spaced shading
+        # regardless of how spread out the actual scores are
+        top_viz["rank_color"] = range(len(top_viz), 0, -1)
         chart_height = max(400, top_n_drugs * 28)
-
-        # Cap color scale at 95th percentile so outliers don't wash out the rest
-        color_max = top_viz["consensus_score"].quantile(0.95)
 
         fig_bar = px.bar(
             top_viz.sort_values("consensus_score"),
             x="consensus_score",
             y="drug_name",
             orientation="h",
-            color="consensus_score",
+            color="rank_color",
             color_continuous_scale="Blues",
-            range_color=[0, color_max],
             labels={"consensus_score": "Reversal Score", "drug_name": "Drug"}
         )
         fig_bar.update_layout(
