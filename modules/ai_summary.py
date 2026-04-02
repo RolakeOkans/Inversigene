@@ -4,7 +4,7 @@ modules/ai_summary.py
 Generates AI-powered explanations using the Anthropic API.
 
 Two functions:
-1. summarize_drugs()  — explains why top drugs ranked highly
+1. summarize_drugs()  — explains why top drugs ranked highly, referencing the actual genes
 2. summarize_genes()  — synthesizes PubMed literature for top genes
 """
 
@@ -16,17 +16,25 @@ from dotenv import load_dotenv
 load_dotenv()
 
 client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
-MODEL = "claude-opus-4-6"
+MODEL = "claude-sonnet-4-6"
 
 
-def summarize_drugs(ranked_df: pd.DataFrame, top_n: int = 5) -> str:
+def summarize_drugs(
+    ranked_df: pd.DataFrame,
+    top_n: int = 5,
+    up_genes: list = None,
+    down_genes: list = None
+) -> str:
     """
-    Generate plain English explanations for the top ranked drugs.
+    Generate plain English explanations for the top ranked drugs,
+    referencing the actual genes from the disease signature.
 
     Parameters
     ----------
-    ranked_df : DataFrame from scoring.rank_drugs() with validation columns
-    top_n     : how many top drugs to explain (default 5)
+    ranked_df  : DataFrame from scoring.rank_drugs() with validation columns
+    top_n      : how many top drugs to explain (default 5)
+    up_genes   : list of upregulated gene symbols from the disease signature
+    down_genes : list of downregulated gene symbols from the disease signature
 
     Returns
     -------
@@ -34,7 +42,7 @@ def summarize_drugs(ranked_df: pd.DataFrame, top_n: int = 5) -> str:
     """
     top = ranked_df.head(top_n)
 
-    # Build a readable summary of the top drugs to send to the model
+    # Build a readable summary of the top drugs
     drug_info = []
     for _, row in top.iterrows():
         info = f"- {row['drug_name']} (score: {row['consensus_score']:.2f}"
@@ -47,21 +55,35 @@ def summarize_drugs(ranked_df: pd.DataFrame, top_n: int = 5) -> str:
 
     drug_list = "\n".join(drug_info)
 
+    # Build gene context if available
+    gene_context = ""
+    if up_genes and down_genes:
+        gene_context = f"""
+The disease signature used to find these drugs consisted of:
+- Top upregulated genes (overactive in cancer): {", ".join(up_genes[:20])}
+- Top downregulated genes (suppressed in cancer): {", ".join(down_genes[:20])}
+
+These genes were matched against drug perturbation profiles in LINCS L1000.
+A drug scores highly when its effect REVERSES this pattern —
+suppressing the upregulated genes and activating the downregulated ones.
+"""
+
     prompt = f"""You are a computational biologist helping interpret drug repurposing results.
 
 The following drugs were ranked as top candidates for breast cancer treatment based on how strongly 
-their gene expression signatures REVERSE a breast cancer gene signature from the LINCS L1000 database.
+their gene expression signatures reverse a breast cancer gene signature from the LINCS L1000 database.
 A higher score means the drug more strongly reverses the cancer expression pattern.
-
+{gene_context}
 Top ranked drugs:
 {drug_list}
 
 For each drug, provide a short paragraph (3-5 sentences) explaining:
 1. What the drug is and its known mechanism of action
-2. Why it might make biological sense as a breast cancer candidate
+2. Which specific genes from the signature above it most likely targets or reverses, and why that makes biological sense
 3. Any caveats or limitations to interpret this result
 
-Be specific and scientific but accessible. If you don't know much about a drug (especially BRD- coded compounds), say so honestly."""
+Be specific — reference actual genes from the list above where relevant.
+If you don't know much about a drug (especially BRD- coded compounds), say so honestly."""
 
     message = client.messages.create(
         model=MODEL,
@@ -85,7 +107,6 @@ def summarize_genes(literature: dict, top_n: int = 5) -> str:
     -------
     String with AI-generated gene literature synthesis
     """
-    # Build a readable summary of abstracts to send to the model
     sections = []
 
     for direction in ["up", "down"]:
@@ -96,7 +117,6 @@ def summarize_genes(literature: dict, top_n: int = 5) -> str:
         label = "upregulated" if direction == "up" else "downregulated"
         sections.append(f"\n{label.upper()} GENES:")
 
-        # Group by gene
         genes_seen = {}
         for entry in abstracts:
             gene = entry["gene"]
@@ -135,7 +155,6 @@ Be concise and scientific. Group upregulated and downregulated genes separately.
 
 # ── Quick test ────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
-    # Test drug summary
     fake_ranked = pd.DataFrame({
         "rank": [1, 2, 3],
         "drug_name": ["parthenolide", "mitoxantrone", "rosuvastatin"],
@@ -144,11 +163,13 @@ if __name__ == "__main__":
         "in_repurposedb": [False, True, True]
     })
 
-    print("=== Drug Summary ===")
-    drug_summary = summarize_drugs(fake_ranked, top_n=3)
+    test_up = ["COL11A1", "TOP2A", "RRM2", "CXCL10", "MKI67"]
+    test_down = ["PIGR", "ADIPOQ", "FABP4", "SCARA5", "RBP4"]
+
+    print("=== Drug Summary (with gene context) ===")
+    drug_summary = summarize_drugs(fake_ranked, top_n=3, up_genes=test_up, down_genes=test_down)
     print(drug_summary)
 
-    # Test gene summary
     fake_literature = {
         "up": [
             {"gene": "TOP2A", "year": "2022", "title": "TOP2A expression in breast cancer subtypes"},
