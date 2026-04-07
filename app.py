@@ -61,6 +61,62 @@ use_demo = st.checkbox("Use built-in GSE45827 breast cancer dataset (demo)")
 
 st.divider()
 
+# ── Reversal chart helper ─────────────────────────────────────────────────────
+def render_reversal_chart(sig_df: pd.DataFrame, drug_name: str, top_n: int = 8, key_prefix: str = "default"):
+    reversal_df = build_reversal_data(sig_df, top_n=top_n)
+    col_d, col_arr, col_r = st.columns([5, 1, 5])
+
+    with col_d:
+        st.markdown("**Disease signature**")
+        fig_d = go.Figure()
+        fig_d.add_trace(go.Bar(
+            x=reversal_df["disease_log2fc"],
+            y=reversal_df["gene"],
+            orientation="h",
+            marker_color=["#e74c3c" if v > 0 else "#3498db" for v in reversal_df["disease_log2fc"]],
+            hovertemplate="<b>%{y}</b><br>log2FC: %{x:.2f}<extra></extra>"
+        ))
+        fig_d.update_layout(
+            height=350, plot_bgcolor="white", paper_bgcolor="white",
+            margin=dict(l=10, r=10, t=10, b=30),
+            xaxis_title="log2 Fold Change",
+            xaxis=dict(tickfont=dict(color=FONT_COLOR), title_font=dict(color=FONT_COLOR), automargin=True, zeroline=True, zerolinecolor="gray"),
+            yaxis=dict(tickfont=dict(color=FONT_COLOR), automargin=True),
+            showlegend=False
+        )
+        st.plotly_chart(fig_d, use_container_width=True, key=f"{key_prefix}_disease")
+
+    with col_arr:
+        st.markdown(
+            "<div style='text-align:center; font-size:2rem; color:#2E86AB; padding-top:120px;'>→</div>",
+            unsafe_allow_html=True
+        )
+
+    with col_r:
+        st.markdown(f"**{drug_name} reversal**")
+        fig_r = go.Figure()
+        fig_r.add_trace(go.Bar(
+            x=reversal_df["reversal_log2fc"],
+            y=reversal_df["gene"],
+            orientation="h",
+            marker_color=["#3498db" if v > 0 else "#e74c3c" for v in reversal_df["reversal_log2fc"]],
+            hovertemplate="<b>%{y}</b><br>Reversal: %{x:.2f}<extra></extra>"
+        ))
+        fig_r.update_layout(
+            height=350, plot_bgcolor="white", paper_bgcolor="white",
+            margin=dict(l=10, r=10, t=10, b=30),
+            xaxis_title="Expected reversal (log2 FC)",
+            xaxis=dict(tickfont=dict(color=FONT_COLOR), title_font=dict(color=FONT_COLOR), automargin=True, zeroline=True, zerolinecolor="gray"),
+            yaxis=dict(tickfont=dict(color=FONT_COLOR), automargin=True),
+            showlegend=False
+        )
+        st.plotly_chart(fig_r, use_container_width=True, key=f"{key_prefix}_reversal")
+
+    st.caption(
+        "Left: genes overexpressed (red) or underexpressed (blue) in cancer. "
+        "Right: the drug is expected to reverse this pattern — colors flip to show the reversal."
+    )
+
 # ── Run button ────────────────────────────────────────────────────────────────
 run = st.button("🚀 Run Analysis", type="primary", use_container_width=True)
 
@@ -181,104 +237,15 @@ if "results" in st.session_state and st.session_state["results"] is not None:
     st.divider()
 
     # ═══════════════════════════════════════════════════════════════════════════
-    # SECTION 0: Reversal visualization
+    # SECTION 0: Reversal visualization — top drug
     # ═══════════════════════════════════════════════════════════════════════════
     st.subheader("🔄 Signature Reversal")
     st.markdown(
-        f"The disease signature shows which genes are overactive (right) and suppressed (left) in cancer. "
-        f"**{top_drug}** — the top ranked drug — reverses this pattern: it suppresses overactive genes "
-        f"and activates suppressed ones. The mirrored bars show the expected reversal direction."
+        f"The disease signature shows which genes are overactive and suppressed in cancer. "
+        f"**{top_drug}** — the top ranked drug — reverses this pattern. "
+        f"Select any drug in the candidates table below to see its specific reversal."
     )
-
-    reversal_df = build_reversal_data(sig_df, top_n=8)
-
-    col_disease, col_arrow, col_reversal = st.columns([5, 1, 5])
-
-    with col_disease:
-        st.markdown(f"**Disease signature** (breast cancer)")
-        fig_disease = go.Figure()
-        fig_disease.add_trace(go.Bar(
-            x=reversal_df["disease_log2fc"],
-            y=reversal_df["gene"],
-            orientation="h",
-            marker_color=[
-                "#e74c3c" if v > 0 else "#3498db"
-                for v in reversal_df["disease_log2fc"]
-            ],
-            hovertemplate="<b>%{y}</b><br>log2FC: %{x:.2f}<extra></extra>"
-        ))
-        fig_disease.update_layout(
-            height=400,
-            plot_bgcolor="white",
-            paper_bgcolor="white",
-            margin=dict(l=10, r=10, t=10, b=40),
-            xaxis_title="log2 Fold Change",
-            xaxis=dict(
-                tickfont=dict(color=FONT_COLOR),
-                title_font=dict(color=FONT_COLOR),
-                automargin=True,
-                zeroline=True,
-                zerolinecolor="gray"
-            ),
-            yaxis=dict(
-                tickfont=dict(color=FONT_COLOR),
-                automargin=True
-            ),
-            showlegend=False
-        )
-        st.plotly_chart(fig_disease, use_container_width=True)
-
-    with col_arrow:
-        st.markdown("")
-        st.markdown("")
-        st.markdown("")
-        st.markdown("")
-        st.markdown("")
-        st.markdown("")
-        st.markdown(
-            "<div style='text-align:center; font-size:2rem; color:#2E86AB; padding-top:80px;'>→</div>",
-            unsafe_allow_html=True
-        )
-
-    with col_reversal:
-        st.markdown(f"**Drug reversal** ({top_drug})")
-        fig_reversal = go.Figure()
-        fig_reversal.add_trace(go.Bar(
-            x=reversal_df["reversal_log2fc"],
-            y=reversal_df["gene"],
-            orientation="h",
-            marker_color=[
-                "#3498db" if v > 0 else "#e74c3c"
-                for v in reversal_df["reversal_log2fc"]
-            ],
-            hovertemplate="<b>%{y}</b><br>Expected reversal: %{x:.2f}<extra></extra>"
-        ))
-        fig_reversal.update_layout(
-            height=400,
-            plot_bgcolor="white",
-            paper_bgcolor="white",
-            margin=dict(l=10, r=10, t=10, b=40),
-            xaxis_title="Expected reversal (log2 FC)",
-            xaxis=dict(
-                tickfont=dict(color=FONT_COLOR),
-                title_font=dict(color=FONT_COLOR),
-                automargin=True,
-                zeroline=True,
-                zerolinecolor="gray"
-            ),
-            yaxis=dict(
-                tickfont=dict(color=FONT_COLOR),
-                automargin=True
-            ),
-            showlegend=False
-        )
-        st.plotly_chart(fig_reversal, use_container_width=True)
-
-    st.caption(
-        "Left: genes overexpressed (red) or underexpressed (blue) in cancer. "
-        "Right: the drug is expected to reverse this pattern — suppressing overexpressed genes "
-        "and activating underexpressed ones. Colors flip to show the reversal."
-    )
+    render_reversal_chart(sig_df, top_drug, key_prefix="summary")
 
     st.divider()
 
@@ -369,7 +336,7 @@ if "results" in st.session_state and st.session_state["results"] is not None:
                 automargin=True
             )
         )
-        st.plotly_chart(fig_vol, use_container_width=True)
+        st.plotly_chart(fig_vol, use_container_width=True, key="volcano_plot")
 
     st.divider()
 
@@ -500,7 +467,7 @@ if "results" in st.session_state and st.session_state["results"] is not None:
                                     title_font=dict(color=FONT_COLOR)
                                 )
                             )
-                            st.plotly_chart(fig_path, use_container_width=True)
+                            st.plotly_chart(fig_path, use_container_width=True, key=f"pathway_{direction}_{lib_name}")
 
                             leg1, leg2, leg3, leg4 = st.columns(4)
                             leg1.markdown("🔴 p < 0.0001")
@@ -525,12 +492,12 @@ if "results" in st.session_state and st.session_state["results"] is not None:
     st.divider()
 
     # ═══════════════════════════════════════════════════════════════════════════
-    # SECTION 4: Ranked drug table + bar chart + inline AI explanations
+    # SECTION 4: Ranked drug table + bar chart + reversal + AI explanation
     # ═══════════════════════════════════════════════════════════════════════════
     st.subheader("💊 Drug Repurposing Candidates")
     st.markdown(
         "Drugs ranked by how strongly they reverse your cancer gene signature. "
-        "Higher score = stronger reversal. **Click any row** to get an AI explanation for that drug."
+        "Higher score = stronger reversal. **Click any row** to see its reversal chart and AI explanation."
     )
 
     col_table, col_chart = st.columns([1.2, 1])
@@ -584,9 +551,9 @@ if "results" in st.session_state and st.session_state["results"] is not None:
                 title_font=dict(color=FONT_COLOR)
             )
         )
-        st.plotly_chart(fig_bar, use_container_width=True)
+        st.plotly_chart(fig_bar, use_container_width=True, key="drug_bar_chart")
 
-    # ── AI explanation for selected drug ──────────────────────────────────────
+    # ── Drug detail: reversal + AI when row is clicked ────────────────────────
     selected_rows = selection.selection.rows if selection.selection.rows else []
 
     if selected_rows:
@@ -595,7 +562,13 @@ if "results" in st.session_state and st.session_state["results"] is not None:
         drug = drug_row["drug_name"]
         drug_ai_key = f"drug_summary_{drug}"
 
-        st.markdown(f"#### 🤖 AI Explanation — {drug}")
+        st.markdown(f"#### 🔄 Reversal & Explanation — {drug}")
+
+        render_reversal_chart(sig_df, drug, key_prefix=f"selected_{drug}")
+
+        st.divider()
+
+        st.markdown(f"**🤖 AI Explanation — {drug}**")
 
         if drug_ai_key not in st.session_state:
             with st.spinner(f"Generating explanation for {drug}..."):
@@ -614,4 +587,4 @@ if "results" in st.session_state and st.session_state["results"] is not None:
         if drug_ai_key in st.session_state:
             st.markdown(st.session_state[drug_ai_key])
     else:
-        st.info("👆 Click a row in the table above to get an AI explanation for that drug.")
+        st.info("👆 Click a row in the table above to see its reversal chart and AI explanation.")
