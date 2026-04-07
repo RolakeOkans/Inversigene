@@ -19,6 +19,7 @@ from modules.literature import fetch_literature, literature_to_df
 from modules.ai_summary import summarize_drugs, summarize_genes
 from modules.pathways import get_pathway_enrichment
 from modules.reversal import build_reversal_data
+from modules.chemistry import get_drug_info
 
 FONT_COLOR = "#111111"
 
@@ -123,7 +124,7 @@ run = st.button("🚀 Run Analysis", type="primary", use_container_width=True)
 if run:
     st.session_state["results"] = None
     for key in list(st.session_state.keys()):
-        if key.startswith("gene_summary_") or key.startswith("drug_summary"):
+        if key.startswith("gene_summary_") or key.startswith("drug_summary") or key.startswith("chem_"):
             del st.session_state[key]
 
     if not uploaded_file and not use_demo:
@@ -492,12 +493,12 @@ if "results" in st.session_state and st.session_state["results"] is not None:
     st.divider()
 
     # ═══════════════════════════════════════════════════════════════════════════
-    # SECTION 4: Ranked drug table + bar chart + reversal + AI explanation
+    # SECTION 4: Ranked drug table + bar chart + drug profile + AI
     # ═══════════════════════════════════════════════════════════════════════════
     st.subheader("💊 Drug Repurposing Candidates")
     st.markdown(
         "Drugs ranked by how strongly they reverse your cancer gene signature. "
-        "Higher score = stronger reversal. **Click any row** to see its reversal chart and AI explanation."
+        "Higher score = stronger reversal. **Click any row** to see its full drug profile."
     )
 
     col_table, col_chart = st.columns([1.2, 1])
@@ -553,7 +554,7 @@ if "results" in st.session_state and st.session_state["results"] is not None:
         )
         st.plotly_chart(fig_bar, use_container_width=True, key="drug_bar_chart")
 
-    # ── Drug detail: reversal + AI when row is clicked ────────────────────────
+    # ── Drug profile when row is clicked ─────────────────────────────────────
     selected_rows = selection.selection.rows if selection.selection.rows else []
 
     if selected_rows:
@@ -561,15 +562,46 @@ if "results" in st.session_state and st.session_state["results"] is not None:
         drug_row = ranked.iloc[selected_idx]
         drug = drug_row["drug_name"]
         drug_ai_key = f"drug_summary_{drug}"
+        chem_key = f"chem_{drug}"
 
-        st.markdown(f"#### 🔄 Reversal & Explanation — {drug}")
+        st.markdown(f"#### 💊 {drug} — Drug Profile")
 
+        # ── Chemical structure from PubChem ───────────────────────────────
+        if chem_key not in st.session_state:
+            with st.spinner(f"Fetching chemical info for {drug}..."):
+                st.session_state[chem_key] = get_drug_info(drug)
+
+        chem = st.session_state[chem_key]
+
+        if chem["found"]:
+            chem_col1, chem_col2 = st.columns([1, 2])
+            with chem_col1:
+                st.image(
+                    chem["structure_url"],
+                    caption=f"2D structure — {chem['formula']}",
+                    width=250
+                )
+            with chem_col2:
+                st.markdown(f"**Molecular formula:** `{chem['formula']}`")
+                st.markdown(
+                    f"**PubChem CID:** [{chem['cid']}]"
+                    f"(https://pubchem.ncbi.nlm.nih.gov/compound/{chem['cid']})"
+                )
+                if chem["description"]:
+                    st.markdown(f"**Pharmacology:** {chem['description']}")
+        else:
+            st.info(f"Chemical structure not available for {drug}. {chem.get('description', '')}")
+
+        st.divider()
+
+        # ── Reversal chart ────────────────────────────────────────────────
+        st.markdown("**🔄 Signature Reversal**")
         render_reversal_chart(sig_df, drug, key_prefix=f"selected_{drug}")
 
         st.divider()
 
-        st.markdown(f"**🤖 AI Explanation — {drug}**")
-
+        # ── AI explanation ────────────────────────────────────────────────
+        st.markdown(f"**🤖 AI Explanation**")
         if drug_ai_key not in st.session_state:
             with st.spinner(f"Generating explanation for {drug}..."):
                 try:
@@ -587,4 +619,4 @@ if "results" in st.session_state and st.session_state["results"] is not None:
         if drug_ai_key in st.session_state:
             st.markdown(st.session_state[drug_ai_key])
     else:
-        st.info("👆 Click a row in the table above to see its reversal chart and AI explanation.")
+        st.info("👆 Click a row in the table above to see its full drug profile.")
