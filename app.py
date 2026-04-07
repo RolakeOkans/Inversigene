@@ -8,7 +8,6 @@ Built with Streamlit. Run with: streamlit run app.py
 import streamlit as st
 import pandas as pd
 import numpy as np
-import plotly.express as px
 import plotly.graph_objects as go
 import io
 
@@ -19,6 +18,7 @@ from modules.validation import validate
 from modules.literature import fetch_literature, literature_to_df
 from modules.ai_summary import summarize_drugs, summarize_genes
 from modules.pathways import get_pathway_enrichment
+from modules.reversal import build_reversal_data
 
 FONT_COLOR = "#111111"
 
@@ -76,41 +76,33 @@ if run:
 
     progress = st.progress(0, text="Loading gene signature...")
 
-    # ── Step 1: Load signature ────────────────────────────────────────────────
     try:
         if use_demo:
             filepath = "data/GSE45827_geo_signature.csv"
         else:
             content = uploaded_file.read().decode("utf-8")
             df_check = pd.read_csv(io.StringIO(content))
-
             if "gene_symbol" not in df_check.columns:
                 st.error("CSV must have a 'gene_symbol' column.")
                 st.stop()
             if "log2fc" not in df_check.columns:
                 st.error("CSV must have a 'log2fc' column.")
                 st.stop()
-
             if "direction" not in df_check.columns:
                 df_check["direction"] = df_check["log2fc"].apply(
                     lambda x: "up" if x > 0 else "down"
                 )
-
             filepath = "data/uploaded_signature.csv"
             df_check.to_csv(filepath, index=False)
 
         up_genes, down_genes, sig_df = load_signature(
-            filepath,
-            top_n=top_n_genes,
-            min_log2fc=min_log2fc
+            filepath, top_n=top_n_genes, min_log2fc=min_log2fc
         )
     except Exception as e:
         st.error(f"Failed to load gene signature: {e}")
         st.stop()
 
     progress.progress(15, text="Querying SigCom LINCS for drug signatures...")
-
-    # ── Step 2: Query LINCS ───────────────────────────────────────────────────
     try:
         lincs_df = query_lincs(up_genes, down_genes, n_results=100)
     except Exception as e:
@@ -118,8 +110,6 @@ if run:
         st.stop()
 
     progress.progress(40, text="Scoring and ranking drugs...")
-
-    # ── Step 3: Score and rank ────────────────────────────────────────────────
     try:
         ranked = rank_drugs(lincs_df)
     except Exception as e:
@@ -127,16 +117,12 @@ if run:
         st.stop()
 
     progress.progress(55, text="Checking clinical trials and repurposing databases...")
-
-    # ── Step 4: Validate ──────────────────────────────────────────────────────
     try:
         ranked = validate(ranked, top_n=top_n_drugs)
     except Exception as e:
         st.warning(f"Validation step had an issue: {e}")
 
     progress.progress(68, text="Searching PubMed for key gene literature...")
-
-    # ── Step 5: Literature ────────────────────────────────────────────────────
     try:
         literature = fetch_literature(
             up_genes, down_genes,
@@ -150,8 +136,6 @@ if run:
         lit_df = pd.DataFrame()
 
     progress.progress(82, text="Running pathway enrichment via Enrichr...")
-
-    # ── Step 6: Pathway enrichment ────────────────────────────────────────────
     try:
         pathways = get_pathway_enrichment(up_genes, down_genes, top_n=100)
     except Exception as e:
@@ -185,12 +169,10 @@ if "results" in st.session_state and st.session_state["results"] is not None:
     # ═══════════════════════════════════════════════════════════════════════════
     st.markdown("### 📊 Analysis Summary")
     c1, c2, c3, c4 = st.columns(4)
-
     top_drug = ranked.iloc[0]["drug_name"] if not ranked.empty else "N/A"
     drugs_with_trials = int((ranked["trial_count"] > 0).sum()) if "trial_count" in ranked.columns else 0
     top_gene_up = sig_df[sig_df["direction"] == "up"].iloc[0]["gene_symbol"] if not sig_df.empty else "N/A"
     top_gene_down = sig_df[sig_df["direction"] == "down"].iloc[0]["gene_symbol"] if not sig_df.empty else "N/A"
-
     c1.metric("🥇 Top Drug Candidate", top_drug)
     c2.metric("🏥 Drugs with Clinical Trials", drugs_with_trials)
     c3.metric("⬆️ Top Upregulated Gene", top_gene_up)
@@ -199,10 +181,111 @@ if "results" in st.session_state and st.session_state["results"] is not None:
     st.divider()
 
     # ═══════════════════════════════════════════════════════════════════════════
+    # SECTION 0: Reversal visualization
+    # ═══════════════════════════════════════════════════════════════════════════
+    st.subheader("🔄 Signature Reversal")
+    st.markdown(
+        f"The disease signature shows which genes are overactive (right) and suppressed (left) in cancer. "
+        f"**{top_drug}** — the top ranked drug — reverses this pattern: it suppresses overactive genes "
+        f"and activates suppressed ones. The mirrored bars show the expected reversal direction."
+    )
+
+    reversal_df = build_reversal_data(sig_df, top_n=8)
+
+    col_disease, col_arrow, col_reversal = st.columns([5, 1, 5])
+
+    with col_disease:
+        st.markdown(f"**Disease signature** (breast cancer)")
+        fig_disease = go.Figure()
+        fig_disease.add_trace(go.Bar(
+            x=reversal_df["disease_log2fc"],
+            y=reversal_df["gene"],
+            orientation="h",
+            marker_color=[
+                "#e74c3c" if v > 0 else "#3498db"
+                for v in reversal_df["disease_log2fc"]
+            ],
+            hovertemplate="<b>%{y}</b><br>log2FC: %{x:.2f}<extra></extra>"
+        ))
+        fig_disease.update_layout(
+            height=400,
+            plot_bgcolor="white",
+            paper_bgcolor="white",
+            margin=dict(l=10, r=10, t=10, b=40),
+            xaxis_title="log2 Fold Change",
+            xaxis=dict(
+                tickfont=dict(color=FONT_COLOR),
+                title_font=dict(color=FONT_COLOR),
+                automargin=True,
+                zeroline=True,
+                zerolinecolor="gray"
+            ),
+            yaxis=dict(
+                tickfont=dict(color=FONT_COLOR),
+                automargin=True
+            ),
+            showlegend=False
+        )
+        st.plotly_chart(fig_disease, use_container_width=True)
+
+    with col_arrow:
+        st.markdown("")
+        st.markdown("")
+        st.markdown("")
+        st.markdown("")
+        st.markdown("")
+        st.markdown("")
+        st.markdown(
+            "<div style='text-align:center; font-size:2rem; color:#2E86AB; padding-top:80px;'>→</div>",
+            unsafe_allow_html=True
+        )
+
+    with col_reversal:
+        st.markdown(f"**Drug reversal** ({top_drug})")
+        fig_reversal = go.Figure()
+        fig_reversal.add_trace(go.Bar(
+            x=reversal_df["reversal_log2fc"],
+            y=reversal_df["gene"],
+            orientation="h",
+            marker_color=[
+                "#3498db" if v > 0 else "#e74c3c"
+                for v in reversal_df["reversal_log2fc"]
+            ],
+            hovertemplate="<b>%{y}</b><br>Expected reversal: %{x:.2f}<extra></extra>"
+        ))
+        fig_reversal.update_layout(
+            height=400,
+            plot_bgcolor="white",
+            paper_bgcolor="white",
+            margin=dict(l=10, r=10, t=10, b=40),
+            xaxis_title="Expected reversal (log2 FC)",
+            xaxis=dict(
+                tickfont=dict(color=FONT_COLOR),
+                title_font=dict(color=FONT_COLOR),
+                automargin=True,
+                zeroline=True,
+                zerolinecolor="gray"
+            ),
+            yaxis=dict(
+                tickfont=dict(color=FONT_COLOR),
+                automargin=True
+            ),
+            showlegend=False
+        )
+        st.plotly_chart(fig_reversal, use_container_width=True)
+
+    st.caption(
+        "Left: genes overexpressed (red) or underexpressed (blue) in cancer. "
+        "Right: the drug is expected to reverse this pattern — suppressing overexpressed genes "
+        "and activating underexpressed ones. Colors flip to show the reversal."
+    )
+
+    st.divider()
+
+    # ═══════════════════════════════════════════════════════════════════════════
     # SECTION 1: Signature preview + Volcano plot
     # ═══════════════════════════════════════════════════════════════════════════
     st.subheader("🔬 Your Gene Signature")
-
     tab_preview, tab_volcano = st.tabs(["Signature preview", "Volcano plot"])
 
     with tab_preview:
@@ -213,7 +296,7 @@ if "results" in st.session_state and st.session_state["results"] is not None:
         st.dataframe(sig_df.head(20), use_container_width=True, hide_index=True)
 
     with tab_volcano:
-        st.markdown("Red = upregulated, Blue = downregulated. Dashed lines show significance thresholds.")
+        st.markdown("Red = upregulated · Blue = downregulated · Top genes labeled · Dashed lines = significance thresholds")
 
         vol_df = sig_df.copy()
         vol_df["log2fc"] = pd.to_numeric(vol_df["log2fc"], errors="coerce")
@@ -226,27 +309,47 @@ if "results" in st.session_state and st.session_state["results"] is not None:
         vol_df.loc[(vol_df["log2fc"] > 1) & (vol_df["p_value"] < 0.05), "color"] = "up"
         vol_df.loc[(vol_df["log2fc"] < -1) & (vol_df["p_value"] < 0.05), "color"] = "down"
 
+        top_up = vol_df[vol_df["color"] == "up"].nlargest(10, "log2fc")
+        top_down = vol_df[vol_df["color"] == "down"].nsmallest(10, "log2fc")
+        top_genes = set(pd.concat([top_up, top_down])["gene_symbol"])
+
         colors = {"up": "#e74c3c", "down": "#3498db", "neutral": "#bdc3c7"}
         fig_vol = go.Figure()
 
         for group, color in colors.items():
             mask = vol_df["color"] == group
             subset = vol_df[mask]
+            unlabeled = subset[~subset["gene_symbol"].isin(top_genes)]
             fig_vol.add_trace(go.Scatter(
-                x=subset["log2fc"],
-                y=subset["-log10p"],
+                x=unlabeled["log2fc"],
+                y=unlabeled["-log10p"],
                 mode="markers",
                 marker=dict(size=4, color=color, opacity=0.7),
-                text=subset["gene_symbol"],
+                text=unlabeled["gene_symbol"],
                 hovertemplate="<b>%{text}</b><br>log2FC: %{x:.2f}<br>-log10p: %{y:.2f}<extra></extra>",
-                name=group
+                name=group,
+                showlegend=False
             ))
+            labeled = subset[subset["gene_symbol"].isin(top_genes)]
+            if not labeled.empty:
+                fig_vol.add_trace(go.Scatter(
+                    x=labeled["log2fc"],
+                    y=labeled["-log10p"],
+                    mode="markers+text",
+                    marker=dict(size=7, color=color, opacity=1.0),
+                    text=labeled["gene_symbol"],
+                    textposition="top center",
+                    textfont=dict(size=10, color=FONT_COLOR),
+                    hovertemplate="<b>%{text}</b><br>log2FC: %{x:.2f}<br>-log10p: %{y:.2f}<extra></extra>",
+                    name=group,
+                    showlegend=False
+                ))
 
         fig_vol.add_vline(x=1, line_dash="dash", line_color="gray", line_width=1)
         fig_vol.add_vline(x=-1, line_dash="dash", line_color="gray", line_width=1)
         fig_vol.add_hline(y=-np.log10(0.05), line_dash="dash", line_color="gray", line_width=1)
         fig_vol.update_layout(
-            height=550,
+            height=600,
             plot_bgcolor="white",
             paper_bgcolor="white",
             showlegend=False,
@@ -290,14 +393,10 @@ if "results" in st.session_state and st.session_state["results"] is not None:
                 for gene in subset["gene"].unique():
                     gene_abstracts = subset[subset["gene"] == gene]
                     with st.expander(f"**{gene}** — {len(gene_abstracts)} abstracts"):
-
                         ai_key = f"gene_summary_{gene}"
                         if st.button(f"🤖 Synthesize {gene} with AI", key=f"btn_{gene}"):
                             gene_lit = {
-                                direction: [
-                                    row.to_dict()
-                                    for _, row in gene_abstracts.iterrows()
-                                ]
+                                direction: [row.to_dict() for _, row in gene_abstracts.iterrows()]
                             }
                             with st.spinner(f"Generating summary for {gene}..."):
                                 try:
@@ -321,21 +420,23 @@ if "results" in st.session_state and st.session_state["results"] is not None:
     st.divider()
 
     # ═══════════════════════════════════════════════════════════════════════════
-    # SECTION 3: Pathway enrichment with visualization
+    # SECTION 3: Pathway enrichment — dot plot
     # ═══════════════════════════════════════════════════════════════════════════
     st.subheader("🧬 Pathway Enrichment")
     st.markdown(
-        "Top biological pathways enriched in your up and downregulated genes via Enrichr. "
-        "Bar color indicates significance: red = p < 0.0001, orange = p < 0.01, blue = p < 0.05. "
+        "Dot size = number of your genes in that pathway. "
+        "Dot color = significance (dark red = most significant). "
+        "X axis = combined score. "
         "Expand any pathway to see which genes are driving it."
     )
 
-    def pval_color(p):
-        if p < 0.0001:
-            return "#E24B4A"
-        if p < 0.01:
-            return "#EF9F27"
-        return "#378ADD"
+    def dot_color(p):
+        if p < 0.0001: return "#A32D2D"
+        if p < 0.01: return "#BA7517"
+        return "#185FA5"
+
+    def dot_size(genes_str):
+        return max(8, min(30, len(genes_str.split(";")) * 4))
 
     tab_up_path, tab_down_path = st.tabs(["⬆️ Upregulated pathways", "⬇️ Downregulated pathways"])
 
@@ -351,22 +452,37 @@ if "results" in st.session_state and st.session_state["results"] is not None:
                         if df.empty:
                             st.info("No significant terms.")
                         else:
-                            df_sorted = df.sort_values("combined_score", ascending=True)
-                            bar_colors = [pval_color(p) for p in df_sorted["adj_pvalue"]]
+                            df_sorted = df.sort_values("combined_score", ascending=True).reset_index(drop=True)
+                            dot_colors = [dot_color(p) for p in df_sorted["adj_pvalue"]]
+                            dot_sizes = [dot_size(g) for g in df_sorted["genes"]]
+                            gene_counts = [len(g.split(";")) for g in df_sorted["genes"]]
 
                             fig_path = go.Figure()
-                            fig_path.add_trace(go.Bar(
+                            fig_path.add_trace(go.Scatter(
                                 x=df_sorted["combined_score"],
                                 y=df_sorted["term"],
-                                orientation="h",
-                                marker_color=bar_colors,
+                                mode="markers",
+                                marker=dict(
+                                    size=dot_sizes,
+                                    color=dot_colors,
+                                    opacity=0.85,
+                                    line=dict(width=1, color="white")
+                                ),
+                                customdata=list(zip(
+                                    df_sorted["adj_pvalue"],
+                                    gene_counts,
+                                    df_sorted["genes"]
+                                )),
                                 hovertemplate=(
                                     "<b>%{y}</b><br>"
-                                    "Combined score: %{x:.1f}<extra></extra>"
+                                    "Combined score: %{x:.1f}<br>"
+                                    "Adj p-value: %{customdata[0]:.2e}<br>"
+                                    "Genes (%{customdata[1]}): %{customdata[2]}"
+                                    "<extra></extra>"
                                 )
                             ))
                             fig_path.update_layout(
-                                height=max(300, len(df) * 40),
+                                height=max(300, len(df) * 50),
                                 plot_bgcolor="white",
                                 paper_bgcolor="white",
                                 margin=dict(l=10, r=20, t=10, b=40),
@@ -386,10 +502,11 @@ if "results" in st.session_state and st.session_state["results"] is not None:
                             )
                             st.plotly_chart(fig_path, use_container_width=True)
 
-                            leg1, leg2, leg3 = st.columns(3)
+                            leg1, leg2, leg3, leg4 = st.columns(4)
                             leg1.markdown("🔴 p < 0.0001")
                             leg2.markdown("🟠 p < 0.01")
                             leg3.markdown("🔵 p < 0.05")
+                            leg4.markdown("⚫ dot size = gene count")
 
                             st.markdown("---")
 
