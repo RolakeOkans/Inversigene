@@ -5,9 +5,8 @@ Inversigene — Breast Cancer Drug Repurposing Tool
 Built with Streamlit. Run with: streamlit run app.py
 
 UX hierarchy:
-  Level 1 — Summary cards + drug table (always visible)
-  Level 2 — Drug profile on row click (target, structure, reversal, AI)
-  Level 3 — Full analysis behind "Show full analysis" button
+  Tab 1 "Drug Candidates" — summary cards, drug table, drug profile on click
+  Tab 2 "Gene & Pathway Analysis" — volcano plot, pathway dot plots, gene literature
 """
 
 import streamlit as st
@@ -126,7 +125,7 @@ run = st.button("🚀 Run Analysis", type="primary", use_container_width=True)
 
 if run:
     st.session_state["results"] = None
-    st.session_state["show_full_analysis"] = False
+    st.session_state["selected_drug"] = None
     for key in list(st.session_state.keys()):
         if key.startswith("gene_summary_") or key.startswith("drug_summary") \
                 or key.startswith("chem_") or key.startswith("chembl_"):
@@ -214,22 +213,20 @@ if run:
 
 # ── Display results ───────────────────────────────────────────────────────────
 if "results" in st.session_state and st.session_state["results"] is not None:
-    ranked    = st.session_state["results"]["ranked"]
-    lit_df    = st.session_state["results"]["lit_df"]
-    sig_df    = st.session_state["results"]["sig_df"]
-    literature= st.session_state["results"]["literature"]
-    up_genes  = st.session_state["results"]["up_genes"]
-    down_genes= st.session_state["results"]["down_genes"]
-    pathways  = st.session_state["results"]["pathways"]
+    ranked     = st.session_state["results"]["ranked"]
+    lit_df     = st.session_state["results"]["lit_df"]
+    sig_df     = st.session_state["results"]["sig_df"]
+    literature = st.session_state["results"]["literature"]
+    up_genes   = st.session_state["results"]["up_genes"]
+    down_genes = st.session_state["results"]["down_genes"]
+    pathways   = st.session_state["results"]["pathways"]
 
-    # ═══════════════════════════════════════════════════════════════════════════
-    # LEVEL 1 — HEADLINE SUMMARY CARDS
-    # ═══════════════════════════════════════════════════════════════════════════
+    # ── Summary cards (always visible above tabs) ─────────────────────────────
     st.markdown("### 📊 Analysis Summary")
     c1, c2, c3, c4 = st.columns(4)
     top_drug = ranked.iloc[0]["drug_name"] if not ranked.empty else "N/A"
     drugs_with_trials = int((ranked["trial_count"] > 0).sum()) if "trial_count" in ranked.columns else 0
-    top_gene_up = sig_df[sig_df["direction"] == "up"].iloc[0]["gene_symbol"] if not sig_df.empty else "N/A"
+    top_gene_up   = sig_df[sig_df["direction"] == "up"].iloc[0]["gene_symbol"]   if not sig_df.empty else "N/A"
     top_gene_down = sig_df[sig_df["direction"] == "down"].iloc[0]["gene_symbol"] if not sig_df.empty else "N/A"
     c1.metric("🥇 Top Drug Candidate", top_drug)
     c2.metric("🏥 Drugs with Clinical Trials", drugs_with_trials)
@@ -238,237 +235,253 @@ if "results" in st.session_state and st.session_state["results"] is not None:
 
     st.divider()
 
-    # ═══════════════════════════════════════════════════════════════════════════
-    # LEVEL 1 — DRUG CANDIDATES TABLE + BAR CHART
-    # ═══════════════════════════════════════════════════════════════════════════
-    st.subheader("💊 Drug Repurposing Candidates")
-    st.markdown(
-        "Ranked by how strongly they reverse your cancer gene signature. "
-        "**Click any row** to see its full drug profile."
-    )
+    # ── Two main tabs ─────────────────────────────────────────────────────────
+    tab_drugs, tab_genes = st.tabs([
+        "💊 Drug Candidates",
+        "🔬 Gene & Pathway Analysis — what drives the signature"
+    ])
 
-    col_table, col_chart = st.columns([1.2, 1])
+    # =========================================================================
+    # TAB 1: DRUG CANDIDATES
+    # =========================================================================
+    with tab_drugs:
 
-    with col_table:
-        display_cols = ["rank", "drug_name", "consensus_score", "n_experiments", "trial_count", "in_repurposedb"]
-        available_cols = [c for c in display_cols if c in ranked.columns]
-        display_df = ranked.head(top_n_drugs)[available_cols].reset_index(drop=True)
-
-        selection = st.dataframe(
-            display_df,
-            use_container_width=True,
-            hide_index=True,
-            on_select="rerun",
-            selection_mode="single-row"
+        st.markdown(
+            "Drugs ranked by how strongly they reverse your cancer gene signature. "
+            "Higher score = stronger reversal. **Click any row** to see its full drug profile. "
+            "Click the same row again to hide it."
         )
 
-        csv_out = ranked.to_csv(index=False).encode("utf-8")
-        st.download_button(
-            label="⬇️ Download results CSV",
-            data=csv_out,
-            file_name="inversigene_results.csv",
-            mime="text/csv"
-        )
+        col_table, col_chart = st.columns([1.2, 1])
 
-    with col_chart:
-        top_viz = ranked.head(top_n_drugs).copy().sort_values("consensus_score")
-        chart_height = max(400, top_n_drugs * 28)
-        fig_bar = go.Figure(go.Bar(
-            x=top_viz["consensus_score"], y=top_viz["drug_name"],
-            orientation="h", marker_color="#2E86AB",
-            hovertemplate="%{y}: %{x:.2f}<extra></extra>"
-        ))
-        fig_bar.update_layout(
-            height=chart_height, plot_bgcolor="white", paper_bgcolor="white",
-            margin=dict(l=10, r=20, t=20, b=40), xaxis_title="Reversal Score",
-            xaxis=dict(automargin=True, tickfont=dict(color=FONT_COLOR), title_font=dict(color=FONT_COLOR)),
-            yaxis=dict(automargin=True, tickfont=dict(color=FONT_COLOR), title_font=dict(color=FONT_COLOR))
-        )
-        st.plotly_chart(fig_bar, use_container_width=True, key="drug_bar_chart")
+        with col_table:
+            display_cols = ["rank", "drug_name", "consensus_score", "n_experiments",
+                            "trial_count", "in_repurposedb"]
+            available_cols = [c for c in display_cols if c in ranked.columns]
+            display_df = ranked.head(top_n_drugs)[available_cols].reset_index(drop=True)
 
-    # ═══════════════════════════════════════════════════════════════════════════
-    # LEVEL 2 — DRUG PROFILE ON CLICK
-    # ═══════════════════════════════════════════════════════════════════════════
-    selected_rows = selection.selection.rows if selection.selection.rows else []
+            selection = st.dataframe(
+                display_df,
+                use_container_width=True,
+                hide_index=True,
+                on_select="rerun",
+                selection_mode="single-row"
+            )
 
-    if selected_rows:
-        selected_idx = selected_rows[0]
-        drug_row = ranked.iloc[selected_idx]
-        drug = drug_row["drug_name"]
-        drug_ai_key  = f"drug_summary_{drug}"
-        chem_key     = f"chem_{drug}"
-        chembl_key   = f"chembl_{drug}"
+            csv_out = ranked.to_csv(index=False).encode("utf-8")
+            st.download_button(
+                label="⬇️ Download results CSV",
+                data=csv_out,
+                file_name="inversigene_results.csv",
+                mime="text/csv"
+            )
 
-        st.divider()
-        st.subheader(f"💊 {drug} — Drug Profile")
+        with col_chart:
+            top_viz = ranked.head(top_n_drugs).copy().sort_values("consensus_score")
+            chart_height = max(400, top_n_drugs * 28)
+            fig_bar = go.Figure(go.Bar(
+                x=top_viz["consensus_score"], y=top_viz["drug_name"],
+                orientation="h", marker_color="#2E86AB",
+                hovertemplate="%{y}: %{x:.2f}<extra></extra>"
+            ))
+            fig_bar.update_layout(
+                height=chart_height, plot_bgcolor="white", paper_bgcolor="white",
+                margin=dict(l=10, r=20, t=20, b=40), xaxis_title="Reversal Score",
+                xaxis=dict(automargin=True, tickfont=dict(color=FONT_COLOR),
+                           title_font=dict(color=FONT_COLOR)),
+                yaxis=dict(automargin=True, tickfont=dict(color=FONT_COLOR),
+                           title_font=dict(color=FONT_COLOR))
+            )
+            st.plotly_chart(fig_bar, use_container_width=True, key="drug_bar_chart")
 
-        # Fetch data
-        if chem_key not in st.session_state:
-            with st.spinner("Fetching chemical structure..."):
-                st.session_state[chem_key] = get_drug_info(drug)
-        if chembl_key not in st.session_state:
-            with st.spinner("Looking up target and indication in ChEMBL..."):
-                st.session_state[chembl_key] = get_chembl_info(drug)
+        # ── Drug profile on row click ─────────────────────────────────────
+        selected_rows = selection.selection.rows if selection.selection.rows else []
 
-        chem   = st.session_state[chem_key]
-        chembl = st.session_state[chembl_key]
-        trials = int(drug_row.get("trial_count", 0)) if "trial_count" in drug_row else 0
-        in_repo = drug_row.get("in_repurposedb", False)
+        if selected_rows:
+            selected_idx = selected_rows[0]
+            drug_row = ranked.iloc[selected_idx]
+            drug = drug_row["drug_name"]
 
-        # ── Decision support cards ────────────────────────────────────────
-        d1, d2, d3, d4 = st.columns(4)
-        with d1:
-            st.markdown("**🎯 Target**")
-            st.markdown(chembl["target"] or "Not found in ChEMBL")
-        with d2:
-            st.markdown("**💉 Indication**")
-            st.markdown(chembl["indication"] or "Not found in ChEMBL")
-        with d3:
-            st.markdown("**⚙️ Mechanism**")
-            st.markdown(chembl["mechanism"] or "Not found in ChEMBL")
-        with d4:
-            st.markdown("**🏥 Breast Cancer Trials**")
-            st.markdown(str(trials))
+            # Toggle: clicking the same drug hides/shows the profile
+            if st.session_state.get("selected_drug") == drug:
+                if st.session_state.get("profile_visible", True):
+                    st.session_state["profile_visible"] = False
+                else:
+                    st.session_state["profile_visible"] = True
+            else:
+                st.session_state["selected_drug"] = drug
+                st.session_state["profile_visible"] = True
 
-        st.divider()
+            if st.session_state.get("profile_visible", True):
+                drug_ai_key = f"drug_summary_{drug}"
+                chem_key    = f"chem_{drug}"
+                chembl_key  = f"chembl_{drug}"
 
-        # ── Chemical structure + links ────────────────────────────────────
-        if chem["found"]:
-            chem_col1, chem_col2 = st.columns([1, 2])
-            with chem_col1:
-                st.image(chem["structure_url"], caption=f"2D structure — {chem['formula']}", width=250)
-            with chem_col2:
-                st.markdown(f"**Molecular formula:** `{chem['formula']}`")
-                st.markdown(
-                    f"**PubChem CID:** [{chem['cid']}]"
-                    f"(https://pubchem.ncbi.nlm.nih.gov/compound/{chem['cid']})"
-                )
-                if chembl["chembl_id"]:
-                    st.markdown(
-                        f"**ChEMBL ID:** [{chembl['chembl_id']}]"
-                        f"(https://www.ebi.ac.uk/chembl/compound_report_card/{chembl['chembl_id']})"
-                    )
-                st.markdown(f"**In repoDB:** {'✅ Yes' if in_repo else '❌ No'}")
+                st.divider()
+                st.subheader(f"💊 {drug} — Drug Profile")
+
+                # Fetch data
+                if chem_key not in st.session_state:
+                    with st.spinner("Fetching chemical structure..."):
+                        st.session_state[chem_key] = get_drug_info(drug)
+                if chembl_key not in st.session_state:
+                    with st.spinner("Looking up target and indication in ChEMBL..."):
+                        st.session_state[chembl_key] = get_chembl_info(drug)
+
+                chem   = st.session_state[chem_key]
+                chembl = st.session_state[chembl_key]
+                trials  = int(drug_row.get("trial_count", 0)) if "trial_count" in drug_row else 0
+                in_repo = drug_row.get("in_repurposedb", False)
+
+                # Decision support cards
+                d1, d2, d3, d4 = st.columns(4)
+                with d1:
+                    st.markdown("**🎯 Target**")
+                    st.markdown(chembl["target"] or "Not found in ChEMBL")
+                with d2:
+                    st.markdown("**💉 Indication**")
+                    st.markdown(chembl["indication"] or "Not found in ChEMBL")
+                with d3:
+                    st.markdown("**⚙️ Mechanism**")
+                    st.markdown(chembl["mechanism"] or "Not found in ChEMBL")
+                with d4:
+                    st.markdown("**🏥 Breast Cancer Trials**")
+                    st.markdown(str(trials))
+
+                st.divider()
+
+                # Chemical structure
+                if chem["found"]:
+                    chem_col1, chem_col2 = st.columns([1, 2])
+                    with chem_col1:
+                        st.image(chem["structure_url"],
+                                 caption=f"2D structure — {chem['formula']}", width=250)
+                    with chem_col2:
+                        st.markdown(f"**Molecular formula:** `{chem['formula']}`")
+                        st.markdown(
+                            f"**PubChem CID:** [{chem['cid']}]"
+                            f"(https://pubchem.ncbi.nlm.nih.gov/compound/{chem['cid']})"
+                        )
+                        if chembl["chembl_id"]:
+                            st.markdown(
+                                f"**ChEMBL ID:** [{chembl['chembl_id']}]"
+                                f"(https://www.ebi.ac.uk/chembl/compound_report_card/{chembl['chembl_id']})"
+                            )
+                        st.markdown(f"**In repoDB:** {'✅ Yes' if in_repo else '❌ No'}")
+                else:
+                    st.info(f"Chemical structure not available for {drug} — Broad Institute screening compound.")
+
+                st.divider()
+
+                # Reversal chart
+                st.markdown("**🔄 Signature Reversal**")
+                render_reversal_chart(sig_df, drug, key_prefix=f"selected_{drug}")
+
+                st.divider()
+
+                # AI explanation
+                st.markdown("**🤖 AI Explanation**")
+                if drug_ai_key not in st.session_state:
+                    with st.spinner(f"Generating explanation for {drug}..."):
+                        try:
+                            explanation = summarize_drugs(
+                                pd.DataFrame([drug_row]), top_n=1,
+                                up_genes=up_genes, down_genes=down_genes
+                            )
+                            st.session_state[drug_ai_key] = explanation
+                        except Exception as e:
+                            st.error(f"AI explanation failed: {e}")
+
+                if drug_ai_key in st.session_state:
+                    st.markdown(st.session_state[drug_ai_key])
         else:
-            st.info(f"Chemical structure not available for {drug} — Broad Institute screening compound.")
+            st.info("👆 Click a row in the table above to see its full drug profile.")
+
+    # =========================================================================
+    # TAB 2: GENE & PATHWAY ANALYSIS
+    # =========================================================================
+    with tab_genes:
+
+        st.markdown(
+            "This tab shows the biological basis of the gene signature — "
+            "which genes are differentially expressed in breast cancer, "
+            "and which biological pathways they activate or suppress. "
+            "This is the input that drives the drug ranking in the first tab."
+        )
 
         st.divider()
 
-        # ── Reversal chart ────────────────────────────────────────────────
-        st.markdown("**🔄 Signature Reversal**")
-        render_reversal_chart(sig_df, drug, key_prefix=f"selected_{drug}")
+        # ── Volcano plot ──────────────────────────────────────────────────
+        st.subheader("🌋 Differentially Expressed Genes")
+        st.markdown(
+            "Each dot is a gene. Red = overactive in cancer, Blue = suppressed in cancer. "
+            "The top 10 most extreme genes in each direction are labeled. "
+            "Dashed lines mark the significance thresholds (|log2FC| > 1, p < 0.05)."
+        )
 
-        st.divider()
+        vol_df = sig_df.copy()
+        vol_df["log2fc"] = pd.to_numeric(vol_df["log2fc"], errors="coerce")
+        vol_df["p_value"] = pd.to_numeric(vol_df["p_value"], errors="coerce")
+        vol_df = vol_df.dropna(subset=["log2fc", "p_value"])
+        vol_df["-log10p"] = -np.log10(vol_df["p_value"].clip(lower=1e-300))
+        vol_df = vol_df[np.isfinite(vol_df["-log10p"])]
 
-        # ── AI explanation ────────────────────────────────────────────────
-        st.markdown("**🤖 AI Explanation**")
-        if drug_ai_key not in st.session_state:
-            with st.spinner(f"Generating explanation for {drug}..."):
-                try:
-                    explanation = summarize_drugs(
-                        pd.DataFrame([drug_row]), top_n=1,
-                        up_genes=up_genes, down_genes=down_genes
-                    )
-                    st.session_state[drug_ai_key] = explanation
-                except Exception as e:
-                    st.error(f"AI explanation failed: {e}")
+        vol_df["color"] = "neutral"
+        vol_df.loc[(vol_df["log2fc"] > 1) & (vol_df["p_value"] < 0.05), "color"] = "up"
+        vol_df.loc[(vol_df["log2fc"] < -1) & (vol_df["p_value"] < 0.05), "color"] = "down"
 
-        if drug_ai_key in st.session_state:
-            st.markdown(st.session_state[drug_ai_key])
+        top_up_v   = vol_df[vol_df["color"] == "up"].nlargest(10, "log2fc")
+        top_down_v = vol_df[vol_df["color"] == "down"].nsmallest(10, "log2fc")
+        top_genes  = set(pd.concat([top_up_v, top_down_v])["gene_symbol"])
 
-    else:
-        st.info("👆 Click a row in the table above to see its full drug profile.")
+        colors = {"up": "#e74c3c", "down": "#3498db", "neutral": "#bdc3c7"}
+        fig_vol = go.Figure()
 
-    st.divider()
-
-    # ═══════════════════════════════════════════════════════════════════════════
-    # LEVEL 3 — FULL ANALYSIS (behind button)
-    # ═══════════════════════════════════════════════════════════════════════════
-    if "show_full_analysis" not in st.session_state:
-        st.session_state["show_full_analysis"] = False
-
-    if st.button("🔬 Show full analysis", use_container_width=True):
-        st.session_state["show_full_analysis"] = not st.session_state["show_full_analysis"]
-
-    if st.session_state["show_full_analysis"]:
-
-        st.divider()
-
-        # ── Gene Signature ────────────────────────────────────────────────
-        st.subheader("🔬 Your Gene Signature")
-        tab_preview, tab_volcano = st.tabs(["Signature preview", "Volcano plot"])
-
-        with tab_preview:
-            col1, col2, col3 = st.columns(3)
-            col1.metric("Total genes", len(sig_df))
-            col2.metric("Upregulated", (sig_df["direction"] == "up").sum())
-            col3.metric("Downregulated", (sig_df["direction"] == "down").sum())
-            st.dataframe(sig_df.head(20), use_container_width=True, hide_index=True)
-
-        with tab_volcano:
-            st.markdown("Red = upregulated · Blue = downregulated · Top genes labeled")
-
-            vol_df = sig_df.copy()
-            vol_df["log2fc"] = pd.to_numeric(vol_df["log2fc"], errors="coerce")
-            vol_df["p_value"] = pd.to_numeric(vol_df["p_value"], errors="coerce")
-            vol_df = vol_df.dropna(subset=["log2fc", "p_value"])
-            vol_df["-log10p"] = -np.log10(vol_df["p_value"].clip(lower=1e-300))
-            vol_df = vol_df[np.isfinite(vol_df["-log10p"])]
-
-            vol_df["color"] = "neutral"
-            vol_df.loc[(vol_df["log2fc"] > 1) & (vol_df["p_value"] < 0.05), "color"] = "up"
-            vol_df.loc[(vol_df["log2fc"] < -1) & (vol_df["p_value"] < 0.05), "color"] = "down"
-
-            top_up   = vol_df[vol_df["color"] == "up"].nlargest(10, "log2fc")
-            top_down = vol_df[vol_df["color"] == "down"].nsmallest(10, "log2fc")
-            top_genes = set(pd.concat([top_up, top_down])["gene_symbol"])
-
-            colors = {"up": "#e74c3c", "down": "#3498db", "neutral": "#bdc3c7"}
-            fig_vol = go.Figure()
-
-            for group, color in colors.items():
-                mask   = vol_df["color"] == group
-                subset = vol_df[mask]
-                unlabeled = subset[~subset["gene_symbol"].isin(top_genes)]
+        for group, color in colors.items():
+            mask   = vol_df["color"] == group
+            subset = vol_df[mask]
+            unlabeled = subset[~subset["gene_symbol"].isin(top_genes)]
+            fig_vol.add_trace(go.Scatter(
+                x=unlabeled["log2fc"], y=unlabeled["-log10p"],
+                mode="markers", marker=dict(size=4, color=color, opacity=0.7),
+                text=unlabeled["gene_symbol"],
+                hovertemplate="<b>%{text}</b><br>log2FC: %{x:.2f}<br>-log10p: %{y:.2f}<extra></extra>",
+                name=group, showlegend=False
+            ))
+            labeled = subset[subset["gene_symbol"].isin(top_genes)]
+            if not labeled.empty:
                 fig_vol.add_trace(go.Scatter(
-                    x=unlabeled["log2fc"], y=unlabeled["-log10p"],
-                    mode="markers", marker=dict(size=4, color=color, opacity=0.7),
-                    text=unlabeled["gene_symbol"],
+                    x=labeled["log2fc"], y=labeled["-log10p"],
+                    mode="markers+text",
+                    marker=dict(size=7, color=color, opacity=1.0),
+                    text=labeled["gene_symbol"], textposition="top center",
+                    textfont=dict(size=10, color=FONT_COLOR),
                     hovertemplate="<b>%{text}</b><br>log2FC: %{x:.2f}<br>-log10p: %{y:.2f}<extra></extra>",
                     name=group, showlegend=False
                 ))
-                labeled = subset[subset["gene_symbol"].isin(top_genes)]
-                if not labeled.empty:
-                    fig_vol.add_trace(go.Scatter(
-                        x=labeled["log2fc"], y=labeled["-log10p"],
-                        mode="markers+text",
-                        marker=dict(size=7, color=color, opacity=1.0),
-                        text=labeled["gene_symbol"], textposition="top center",
-                        textfont=dict(size=10, color=FONT_COLOR),
-                        hovertemplate="<b>%{text}</b><br>log2FC: %{x:.2f}<br>-log10p: %{y:.2f}<extra></extra>",
-                        name=group, showlegend=False
-                    ))
 
-            fig_vol.add_vline(x=1,  line_dash="dash", line_color="gray", line_width=1)
-            fig_vol.add_vline(x=-1, line_dash="dash", line_color="gray", line_width=1)
-            fig_vol.add_hline(y=-np.log10(0.05), line_dash="dash", line_color="gray", line_width=1)
-            fig_vol.update_layout(
-                height=600, plot_bgcolor="white", paper_bgcolor="white", showlegend=False,
-                xaxis_title="log2 Fold Change", yaxis_title="-log10(p-value)",
-                xaxis=dict(showgrid=True, gridcolor="#f0f0f0", zeroline=True, zerolinecolor="gray",
-                           tickfont=dict(color=FONT_COLOR), title_font=dict(color=FONT_COLOR), automargin=True),
-                yaxis=dict(showgrid=True, gridcolor="#f0f0f0",
-                           tickfont=dict(color=FONT_COLOR), title_font=dict(color=FONT_COLOR), automargin=True)
-            )
-            st.plotly_chart(fig_vol, use_container_width=True, key="volcano_plot")
+        fig_vol.add_vline(x=1,  line_dash="dash", line_color="gray", line_width=1)
+        fig_vol.add_vline(x=-1, line_dash="dash", line_color="gray", line_width=1)
+        fig_vol.add_hline(y=-np.log10(0.05), line_dash="dash", line_color="gray", line_width=1)
+        fig_vol.update_layout(
+            height=600, plot_bgcolor="white", paper_bgcolor="white", showlegend=False,
+            xaxis_title="log2 Fold Change", yaxis_title="-log10(p-value)",
+            xaxis=dict(showgrid=True, gridcolor="#f0f0f0", zeroline=True, zerolinecolor="gray",
+                       tickfont=dict(color=FONT_COLOR), title_font=dict(color=FONT_COLOR), automargin=True),
+            yaxis=dict(showgrid=True, gridcolor="#f0f0f0",
+                       tickfont=dict(color=FONT_COLOR), title_font=dict(color=FONT_COLOR), automargin=True)
+        )
+        st.plotly_chart(fig_vol, use_container_width=True, key="volcano_plot")
 
         st.divider()
 
-        # ── Pathway Enrichment ────────────────────────────────────────────
-        st.subheader("🧬 Pathway Enrichment")
+        # ── Pathway enrichment ────────────────────────────────────────────
+        st.subheader("🧬 Enriched Biological Pathways")
         st.markdown(
-            "Dot size = gene count · Dot color = significance · "
-            "Expand a pathway to see which genes drive it."
+            "Which biological processes are activated (upregulated genes) or suppressed "
+            "(downregulated genes) in this cancer signature. "
+            "**Hover over any dot** to see the pathway name, significance, and which of your genes drive it. "
+            "Dot size = gene count, dot color = p-value significance."
         )
 
         def dot_color(p):
@@ -479,7 +492,10 @@ if "results" in st.session_state and st.session_state["results"] is not None:
         def dot_size(genes_str):
             return max(8, min(30, len(genes_str.split(";")) * 4))
 
-        tab_up_path, tab_down_path = st.tabs(["⬆️ Upregulated pathways", "⬇️ Downregulated pathways"])
+        tab_up_path, tab_down_path = st.tabs([
+            "⬆️ Pathways activated in cancer",
+            "⬇️ Pathways suppressed in cancer"
+        ])
 
         for tab, direction in [(tab_up_path, "up"), (tab_down_path, "down")]:
             with tab:
@@ -510,9 +526,11 @@ if "results" in st.session_state and st.session_state["results"] is not None:
                                         df_sorted["genes"]
                                     )),
                                     hovertemplate=(
-                                        "<b>%{y}</b><br>Score: %{x:.1f}<br>"
-                                        "p = %{customdata[0]:.2e}<br>"
-                                        "Genes (%{customdata[1]}): %{customdata[2]}<extra></extra>"
+                                        "<b>%{y}</b><br>"
+                                        "Combined score: %{x:.1f}<br>"
+                                        "Adj p-value: %{customdata[0]:.2e}<br>"
+                                        "Genes (%{customdata[1]}): %{customdata[2]}"
+                                        "<extra></extra>"
                                     )
                                 ))
                                 fig_path.update_layout(
@@ -521,9 +539,11 @@ if "results" in st.session_state and st.session_state["results"] is not None:
                                     margin=dict(l=10, r=20, t=10, b=40),
                                     xaxis_title="Combined score", showlegend=False,
                                     xaxis=dict(gridcolor="#f0f0f0", automargin=True,
-                                               tickfont=dict(color=FONT_COLOR), title_font=dict(color=FONT_COLOR)),
+                                               tickfont=dict(color=FONT_COLOR),
+                                               title_font=dict(color=FONT_COLOR)),
                                     yaxis=dict(automargin=True,
-                                               tickfont=dict(color=FONT_COLOR), title_font=dict(color=FONT_COLOR))
+                                               tickfont=dict(color=FONT_COLOR),
+                                               title_font=dict(color=FONT_COLOR))
                                 )
                                 st.plotly_chart(fig_path, use_container_width=True,
                                                 key=f"pathway_{direction}_{lib_name}")
@@ -533,28 +553,22 @@ if "results" in st.session_state and st.session_state["results"] is not None:
                                 leg2.markdown("🟠 p < 0.01")
                                 leg3.markdown("🔵 p < 0.05")
                                 leg4.markdown("⚫ size = gene count")
-                                st.markdown("---")
-
-                                for _, row in df.iterrows():
-                                    genes_list = row["genes"].split(";")
-                                    with st.expander(
-                                        f"**{row['term']}** — p = {row['adj_pvalue']:.2e} | {len(genes_list)} genes"
-                                    ):
-                                        st.markdown(f"**Combined score:** {row['combined_score']:.2f}")
-                                        st.markdown("**Genes driving this pathway:**")
-                                        st.code(" | ".join(genes_list))
 
         st.divider()
 
-        # ── Gene Literature ───────────────────────────────────────────────
+        # ── Gene literature ───────────────────────────────────────────────
         st.subheader("📚 Gene Literature & AI Synthesis")
         st.markdown(
-            "Expand a gene to read published abstracts and generate an AI summary inline."
+            "Published research on the top differentially expressed genes in breast cancer. "
+            "Expand a gene to read abstracts and generate an AI synthesis of the evidence."
         )
 
-        tab_up, tab_down = st.tabs(["⬆️ Upregulated genes", "⬇️ Downregulated genes"])
+        tab_up_lit, tab_down_lit = st.tabs([
+            "⬆️ Overactive genes in cancer",
+            "⬇️ Suppressed genes in cancer"
+        ])
 
-        for tab, direction in [(tab_up, "up"), (tab_down, "down")]:
+        for tab, direction in [(tab_up_lit, "up"), (tab_down_lit, "down")]:
             with tab:
                 subset = lit_df[lit_df["direction"] == direction] if not lit_df.empty else pd.DataFrame()
                 if subset.empty:
