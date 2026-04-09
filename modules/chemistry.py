@@ -1,54 +1,38 @@
 """
 modules/chemistry.py
 
-Fetches drug information from the PubChem API including:
-- Chemical structure image (SVG)
-- Molecular formula
-- Drug target / mechanism of action
-- CID (PubChem compound ID)
+Fetches drug information from two sources:
 
-PubChem API is free and requires no authentication.
+1. PubChem — chemical structure, molecular formula
+2. ChEMBL REST API — target, mechanism of action, approved indication
+
+Key fix: mechanism endpoint requires parent_molecule_chembl_id filter,
+not molecule_chembl_id, to find mechanism records across salt forms.
 """
 
 import requests
 
-
 PUBCHEM_BASE = "https://pubchem.ncbi.nlm.nih.gov/rest/pug"
+CHEMBL_BASE = "https://www.ebi.ac.uk/chembl/api/data"
 
+
+# ── PubChem ───────────────────────────────────────────────────────────────────
 
 def get_drug_info(drug_name: str) -> dict:
     """
-    Fetch drug information from PubChem by drug name.
-
-    Parameters
-    ----------
-    drug_name : name of the drug e.g. "tamoxifen", "mitoxantrone"
-
-    Returns
-    -------
-    Dict with keys:
-        cid           : PubChem compound ID (int or None)
-        name          : canonical name from PubChem
-        formula       : molecular formula e.g. "C26H29NO"
-        structure_url : URL to the 2D structure image (PNG)
-        description   : brief description if available
-        found         : bool — False if drug not found
+    Fetch chemical structure and formula from PubChem.
     """
     result = {
         "cid": None,
         "name": drug_name,
         "formula": None,
         "structure_url": None,
-        "description": None,
         "found": False
     }
 
-    # Skip BRD- coded compounds — they are not in PubChem by name
     if drug_name.startswith("BRD-") or drug_name.startswith("BRD_"):
-        result["description"] = "Broad Institute compound — not available in PubChem by name."
         return result
 
-    # Step 1: Get CID from drug name
     try:
         cid_resp = requests.get(
             f"{PUBCHEM_BASE}/compound/name/{requests.utils.quote(drug_name)}/cids/JSON",
@@ -68,7 +52,6 @@ def get_drug_info(drug_name: str) -> dict:
     except Exception:
         return result
 
-    # Step 2: Get molecular formula and canonical name
     try:
         props_resp = requests.get(
             f"{PUBCHEM_BASE}/compound/cid/{cid}/property/MolecularFormula,IUPACName/JSON",
@@ -81,53 +64,144 @@ def get_drug_info(drug_name: str) -> dict:
     except Exception:
         pass
 
-    # Step 3: Structure image URL — use PubChem's image endpoint directly
     result["structure_url"] = (
         f"https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/cid/{cid}/PNG"
         f"?image_size=300x300"
     )
 
-    # Step 4: Get description from PubChem
+    return result
+
+
+# ── ChEMBL ────────────────────────────────────────────────────────────────────
+
+def _get_chembl_id(drug_name: str) -> str | None:
+    """Find ChEMBL parent ID for a drug name."""
     try:
-        desc_resp = requests.get(
-            f"https://pubchem.ncbi.nlm.nih.gov/rest/pug_view/data/compound/{cid}/JSON"
-            f"?heading=Pharmacology+and+Biochemistry",
-            timeout=10
+        # Try exact preferred name
+        resp = requests.get(
+            f"{CHEMBL_BASE}/molecule.json",
+            params={"pref_name__iexact": drug_name, "limit": 1},
+            timeout=15
         )
-        if desc_resp.status_code == 200:
-            data = desc_resp.json()
-            sections = (
-                data.get("Record", {})
-                .get("Section", [])
-            )
-            for section in sections:
-                if "Pharmacology" in section.get("TOCHeading", ""):
-                    subsections = section.get("Section", [])
-                    for sub in subsections:
-                        info = sub.get("Information", [])
-                        for item in info:
-                            val = item.get("Value", {}).get("StringWithMarkup", [{}])
-                            if val:
-                                text = val[0].get("String", "")
-                                if len(text) > 50:
-                                    result["description"] = text[:500]
-                                    break
-                        if result["description"]:
-                            break
+        if resp.status_code == 200:
+            mols = resp.json().get("molecules", [])
+            if mols:
+                return mols[0]["molecule_chembl_id"]
+
+        # Try synonym
+        resp = requests.get(
+            f"{CHEMBL_BASE}/molecule.json",
+            params={"molecule_synonyms__molecule_synonym__iexact": drug_name, "limit": 1},
+            timeout=15
+        )
+        if resp.status_code == 200:
+            mols = resp.json().get("molecules", [])
+            if mols:
+                return mols[0]["molecule_chembl_id"]
+
     except Exception:
         pass
+    return None
+
+
+def get_chembl_info(drug_name: str) -> dict:
+    """
+    Fetch target, mechanism of action, and indication from ChEMBL.
+
+    Key: uses parent_molecule_chembl_id for mechanism lookup, which
+    correctly finds mechanism records stored under salt forms.
+    """
+    result = {
+        "chembl_id": None,
+        "target": None,
+        "mechanism": None,
+        "indication": None,
+        "found": False
+    }
+
+    if drug_name.startswith("BRD-") or drug_name.startswith("BRD_"):
+        result["target"] = "Uncharacterized compound"
+        result["mechanism"] = "Uncharacterized compound"
+        result["indication"] = "Uncharacterized compound"
+        return result
+
+    chembl_id = _get_chembl_id(drug_name)
+    if not chembl_id:
+        return result
+
+    result["chembl_id"] = chembl_id
+    result["found"] = True
+
+    try:
+        # ── Mechanism and target ──────────────────────────────────────────
+        # Must use parent_molecule_chembl_id — mechanisms are stored under
+        # the parent compound ID, not always the molecule ID returned by search
+        mech_resp = requests.get(
+            f"{CHEMBL_BASE}/mechanism.json",
+            params={
+                "parent_molecule_chembl_id": chembl_id,
+                "limit": 10
+            },
+            timeout=15
+        )
+
+        if mech_resp.status_code == 200:
+            mechs = mech_resp.json().get("mechanisms", [])
+            if mechs:
+                # Prefer entries where disease_efficacy=1 (directly treats disease)
+                best = next(
+                    (m for m in mechs if m.get("disease_efficacy") == 1),
+                    mechs[0]
+                )
+                result["mechanism"] = best.get("mechanism_of_action")
+                # Get target name from target endpoint using target_chembl_id
+                target_id = best.get("target_chembl_id")
+                if target_id:
+                    t_resp = requests.get(
+                        f"{CHEMBL_BASE}/target/{target_id}.json",
+                        timeout=10
+                    )
+                    if t_resp.status_code == 200:
+                        result["target"] = t_resp.json().get("pref_name")
+
+        # ── Indication ────────────────────────────────────────────────────
+        ind_resp = requests.get(
+            f"{CHEMBL_BASE}/drug_indication.json",
+            params={"molecule_chembl_id": chembl_id, "limit": 20},
+            timeout=15
+        )
+
+        if ind_resp.status_code == 200:
+            indications = ind_resp.json().get("drug_indications", [])
+            if indications:
+                sorted_inds = sorted(
+                    indications,
+                    key=lambda x: x.get("max_phase_for_ind") or 0,
+                    reverse=True
+                )
+                result["indication"] = sorted_inds[0].get("efo_term")
+
+    except Exception as e:
+        print(f"  ChEMBL lookup failed for {drug_name}: {e}")
 
     return result
 
 
 # ── Quick test ────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
-    for drug in ["tamoxifen", "mitoxantrone", "rosuvastatin", "parthenolide", "BRD-K86574132"]:
+    test_drugs = ["tamoxifen", "mitoxantrone", "rosuvastatin", "parthenolide", "BRD-K86574132"]
+
+    for drug in test_drugs:
+        print(f"\n{'='*40}")
+        print(f"Drug: {drug}")
+
         info = get_drug_info(drug)
-        print(f"\n{drug}:")
-        print(f"  Found: {info['found']}")
-        print(f"  CID: {info['cid']}")
+        print(f"  PubChem found: {info['found']}")
         print(f"  Formula: {info['formula']}")
-        print(f"  Structure URL: {info['structure_url']}")
-        if info['description']:
-            print(f"  Description: {info['description'][:100]}...")
+
+        chembl = get_chembl_info(drug)
+        print(f"  ChEMBL found: {chembl['found']}")
+        print(f"  ChEMBL ID: {chembl['chembl_id']}")
+        print(f"  Target: {chembl['target']}")
+        print(f"  Mechanism: {chembl['mechanism']}")
+        print(f"  Indication: {chembl['indication']}")
