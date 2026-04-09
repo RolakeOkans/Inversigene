@@ -6,3 +6,4 @@ requests
 biopython
 openpyxl
 anthropic
+python-dotenv
