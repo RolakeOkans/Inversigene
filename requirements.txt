@@ -6,4 +6,3 @@ requests
 biopython
 openpyxl
 anthropic
-python-dotenvchembl-webresource-client
